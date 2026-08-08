@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 2. CSS SICURO E COMPATIBILE MOBILE (NASCONDE SOLO FOOTER E MENU OPZIONI SENZA BLOCCARE LA SIDEBAR)
+# 2. CSS MOBILE-FRIENDLY
 st.markdown(
     """
     <style>
@@ -151,10 +151,10 @@ with st.sidebar.expander("➕ AGGIUNGI MEZZO"):
           "storico_interventi": [],
       }
       Garage.salva(dati)
-      st.success("Veicolo aggiunto! Selezionalo dal menu a tendina.")
+      st.success("Veicolo aggiunto!")
       st.rerun()
     else:
-      st.error("Inserisci almeno la Targa!")
+      st.error("Inserisci la Targa!")
 
 # Rimuovi Veicolo
 with st.sidebar.expander("🗑️ RIMUOVI MEZZO"):
@@ -168,12 +168,63 @@ with st.sidebar.expander("🗑️ RIMUOVI MEZZO"):
       if targa_del != "-- Seleziona --" and targa_del in dati:
         del dati[targa_del]
         Garage.salva(dati)
-        st.success(f"Veicolo {targa_del} rimosso con successo!")
+        st.success(f"Veicolo {targa_del} rimosso!")
         st.rerun()
       else:
         st.warning("Seleziona una targa valida.")
   else:
     st.info("Nessun veicolo presente.")
+
+st.sidebar.divider()
+
+# --- BACKUP & RIPRISTINO DATI ---
+with st.sidebar.expander("💾 BACKUP & RIPRISTINO"):
+  st.caption("Scarica una copia dei tuoi dati per non perderli mai.")
+
+  # Pulsante Download Backup
+  stringa_json = json.dumps(dati, indent=4, ensure_ascii=False)
+  st.download_button(
+      label="📥 Scarica Backup Dati",
+      data=stringa_json,
+      file_name=f"backup_garage_{datetime.date.today().strftime('%Y%m%d')}.json",
+      mime="application/json",
+  )
+
+  st.divider()
+
+  # Caricamento Backup
+  st.caption("Ripristina i dati da un file salvato:")
+  file_caricato = st.file_uploader(
+      "Scegli file di backup", type=["json"], label_visibility="collapsed"
+  )
+
+  if file_caricato is not None:
+    if st.button("🔄 Ripristina Dati"):
+      try:
+        dati_ripristinati = json.load(file_caricato)
+        Garage.salva(dati_ripristinati)
+        st.success("Dati ripristinati con successo!")
+        st.rerun()
+      except Exception as e:
+        st.error("File di backup non valido.")
+
+st.sidebar.divider()
+
+# --- SEZIONE AIUTO & ASSISTENZA ---
+with st.sidebar.expander("❓ AIUTO & ASSISTENZA"):
+  st.markdown(
+      """
+    **Hai bisogno di aiuto?**
+    
+    Se riscontri problemi o hai perso i tuoi dati, contattaci:
+    
+    * 📧 **Email:** supporto@tuodominio.it
+    * 💬 **WhatsApp:** +39 333 1234567
+    
+    *Consiglio:* Fai un backup periodico dalla sezione **BACKUP & RIPRISTINO** qui sopra.
+    """
+  )
+
 
 # --- DETTAGLIO VEICOLO ---
 if targa_selezionata and targa_selezionata != "-- Seleziona --":
