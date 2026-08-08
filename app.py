@@ -11,18 +11,16 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 2. CSS PER NASCONDERE IL MENU E IL CODICE AGLI UTENTI
+# 2. CSS OPTIMIZED PER MOBILE (NASCONDE MENU E BARRE SENZA BLOCCARE IL TOUCH)
 st.markdown(
     """
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-    [data-testid="stHeader"] {display: none !important;}
-    [data-testid="stToolbar"] {display: none !important;}
     .block-container {
-        padding-top: 2rem !important;
-        padding-bottom: 2rem !important;
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
     }
     </style>
 """,
@@ -93,7 +91,7 @@ class Garage:
 
 dati = Garage.carica()
 
-for k in dati.keys():
+for k in list(dati.keys()):
   Garage.assicura_struttura_veicolo(dati[k])
 
 # --- BARRA LATERALE ---
@@ -103,7 +101,7 @@ st.sidebar.title("Garage Manager Pro 📱")
 def formatta_opzione(targa):
   if targa == "-- Seleziona --":
     return targa
-  modello = dati[targa].get("nome_modello", "").upper()
+  modello = dati.get(targa, {}).get("nome_modello", "").upper()
   if modello and modello != "NON SPECIFICATO":
     return f"{targa} ({modello})"
   return targa
@@ -155,6 +153,7 @@ with st.sidebar.expander("➕ AGGIUNGI MEZZO"):
       }
       Garage.salva(dati)
       st.success("Veicolo aggiunto! Selezionalo dal menu a tendina.")
+      st.rerun()
     else:
       st.error("Inserisci almeno la Targa!")
 
@@ -171,6 +170,7 @@ with st.sidebar.expander("🗑️ RIMUOVI MEZZO"):
         del dati[targa_del]
         Garage.salva(dati)
         st.success(f"Veicolo {targa_del} rimosso con successo!")
+        st.rerun()
       else:
         st.warning("Seleziona una targa valida.")
   else:
@@ -188,7 +188,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
   )
   st.header(f"🚗 Scheda Veicolo: {targa_selezionata.upper()}{modello_str}")
 
-  with st.expander("✏️ Modifica Targa / Nome Modello"):
+  with st.expander("✏️ Modifica Nome Modello"):
     col_m1, col_m2 = st.columns([3, 1])
     mod_nome = (
         col_m1.text_input(
@@ -201,6 +201,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
       v["nome_modello"] = mod_nome
       Garage.salva(dati)
       st.success("Nome aggiornato!")
+      st.rerun()
 
   c_km1, c_km2 = st.columns([3, 1])
   nuovi_km = c_km1.number_input(
@@ -210,6 +211,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
     v["km_attuali"] = nuovi_km
     Garage.salva(dati)
     st.success("Km aggiornati!")
+    st.rerun()
 
   st.divider()
 
@@ -247,6 +249,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         v[campo] = dt_input.strftime("%d/%m/%Y")
         Garage.salva(dati)
         st.success(f"{nome_doc} salvata!")
+        st.rerun()
 
   # 2. MECCANICA
   with col_mec:
@@ -311,6 +314,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         })
         Garage.salva(dati)
         st.success("Inversione registrata!")
+        st.rerun()
 
   with col_rap2:
     with st.expander("🛞 Cambio Gomme Nuovo"):
@@ -332,6 +336,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         })
         Garage.salva(dati)
         st.success("Cambio gomme salvato!")
+        st.rerun()
 
   with col_rap3:
     with st.expander("🛑 Pastiglie / Dischi"):
@@ -360,6 +365,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         })
         Garage.salva(dati)
         st.success(f"{nome_c} salvato!")
+        st.rerun()
 
   st.divider()
 
@@ -440,6 +446,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         })
         Garage.salva(dati)
         st.success("Tagliando completo registrato!")
+        st.rerun()
 
   st.divider()
 
@@ -465,6 +472,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
       v["note_storiche"] = note_storiche
       Garage.salva(dati)
       st.success("Nota salvata con successo!")
+      st.rerun()
 
   if note_storiche:
     with st.expander("📌 Modifica o Elimina Note Passate", expanded=True):
@@ -487,11 +495,13 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
             del v["note_storiche"][d_nota]
             st.info("Nota rimossa!")
           Garage.salva(dati)
+          st.rerun()
 
         if col_del.button("🗑️ Elimina", key=f"btn_del_note_{d_nota}"):
           del v["note_storiche"][d_nota]
           Garage.salva(dati)
           st.success("Nota eliminata!")
+          st.rerun()
 
         st.divider()
 
