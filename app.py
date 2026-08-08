@@ -11,20 +11,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 2. CSS PER NASCONDERE MENU E CODICE SENZA NASCONDERE LA FRECCIA DELLA SIDEBAR
+# 2. CSS SICURO E COMPATIBILE MOBILE (NASCONDE SOLO FOOTER E MENU OPZIONI SENZA BLOCCARE LA SIDEBAR)
 st.markdown(
     """
     <style>
-    /* Nasconde il menu a tre pallini e la toolbar in alto a destra */
-    #MainMenu {visibility: hidden !important;}
-    [data-testid="stToolbar"] {visibility: hidden !important;}
-    
-    /* Nasconde il footer 'Made with Streamlit' */
-    footer {visibility: hidden !important;}
-    
-    /* Rende trasparente l'header mantenendo visibile la freccia di apertura sidebar */
-    header {background-color: transparent !important;}
-    
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
     .block-container {
         padding-top: 2rem !important;
         padding-bottom: 1rem !important;
@@ -545,5 +537,6 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
 
 else:
   st.info(
-      "👈 Apri il menu a sinistra per selezionare o aggiungere un veicolo!"
+      "👈 Apri il menu a sinistra (in alto a sinistra sul telefono) per"
+      " selezionare o aggiungere un veicolo!"
   )
