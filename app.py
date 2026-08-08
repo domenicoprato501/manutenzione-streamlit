@@ -11,14 +11,17 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 2. CSS PULITO PER PULSANTI E SPAGINAZIONE
+# 2. CSS PER NASCONDERE IL MENU E IL CODICE AGLI UTENTI
 st.markdown(
     """
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    header {visibility: hidden;}
+    [data-testid="stHeader"] {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
     .block-container {
-        padding-top: 1.5rem !important;
+        padding-top: 2rem !important;
         padding-bottom: 2rem !important;
     }
     </style>
