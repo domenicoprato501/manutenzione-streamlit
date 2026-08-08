@@ -509,7 +509,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
       except:
         anno = "Altro"
 
-      if anno not in interveanti_per_anno:
+      if anno not in interventi_per_anno:
         interventi_per_anno[anno] = []
       interventi_per_anno[anno].append(intv)
 
@@ -525,6 +525,5 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
 
 else:
   st.info(
-      "👈 Apri il menu a sinistra (o premi l'icona con la freccetta) per"
-      " selezionare o aggiungere un veicolo!"
+      "👈 Apri il menu a sinistra per selezionare o aggiungere un veicolo!"
   )
