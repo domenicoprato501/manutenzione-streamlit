@@ -11,15 +11,22 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 2. CSS OPTIMIZED PER MOBILE (NASCONDE MENU E BARRE SENZA BLOCCARE IL TOUCH)
+# 2. CSS PER NASCONDERE MENU E CODICE SENZA NASCONDERE LA FRECCIA DELLA SIDEBAR
 st.markdown(
     """
     <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+    /* Nasconde il menu a tre pallini e la toolbar in alto a destra */
+    #MainMenu {visibility: hidden !important;}
+    [data-testid="stToolbar"] {visibility: hidden !important;}
+    
+    /* Nasconde il footer 'Made with Streamlit' */
+    footer {visibility: hidden !important;}
+    
+    /* Rende trasparente l'header mantenendo visibile la freccia di apertura sidebar */
+    header {background-color: transparent !important;}
+    
     .block-container {
-        padding-top: 1rem !important;
+        padding-top: 2rem !important;
         padding-bottom: 1rem !important;
     }
     </style>
