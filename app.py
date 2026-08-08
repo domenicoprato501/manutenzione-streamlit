@@ -3,7 +3,7 @@ import json
 import os
 import streamlit as st
 
-# 1. UNICA CHIAMATA A SET_PAGE_CONFIG (DEVE ESSERE IN CIMA)
+# 1. SET_PAGE_CONFIG DEVE ESSERE IN CIMA
 st.set_page_config(
     page_title="Garage Manager Pro 📱",
     page_icon="🚗",
@@ -11,13 +11,22 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. NASCONDE MENU, FOOTER E PULSANTE GITHUB SENZA ROMPERE L'APP
+# 2. CSS PER NASCONDERE L'HEADER SENZA BLOCCARE I CLIC SULL'INTERFACCIA
 hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
-            header {visibility: hidden;}
-            .stAppHeader {display: none;}
+            header {
+                visibility: hidden;
+                height: 0px !important;
+                min-height: 0px !important;
+            }
+            .stAppHeader {
+                display: none !important;
+            }
+            .block-container {
+                padding-top: 2rem !important;
+            }
             </style>
             """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
