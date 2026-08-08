@@ -1,4 +1,17 @@
 import streamlit as st
+
+# Nasconde il menu in alto e il pulsante di GitHub
+st.set_page_config(page_title="La mia App", initial_sidebar_state="collapsed")
+
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+import streamlit as st
 import datetime
 import json
 import os
