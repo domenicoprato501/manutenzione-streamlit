@@ -3,33 +3,28 @@ import json
 import os
 import streamlit as st
 
-# 1. SET_PAGE_CONFIG DEVE ESSERE IN CIMA
+# 1. CONFIGURAZIONE PAGINA
 st.set_page_config(
     page_title="Garage Manager Pro 📱",
     page_icon="🚗",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
-# 2. CSS PER NASCONDERE L'HEADER SENZA BLOCCARE I CLIC SULL'INTERFACCIA
-hide_streamlit_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {
-                visibility: hidden;
-                height: 0px !important;
-                min-height: 0px !important;
-            }
-            .stAppHeader {
-                display: none !important;
-            }
-            .block-container {
-                padding-top: 2rem !important;
-            }
-            </style>
-            """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+# 2. CSS PULITO PER PULSANTI E SPAGINAZIONE
+st.markdown(
+    """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 2rem !important;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
 
 FILE_DATI = "dati_veicoli_multipli.json"
 
@@ -98,7 +93,7 @@ dati = Garage.carica()
 for k in dati.keys():
   Garage.assicura_struttura_veicolo(dati[k])
 
-# --- BARRA LATERALE: SELEZIONE E GESTIONE MEZZI ---
+# --- BARRA LATERALE ---
 st.sidebar.title("Garage Manager Pro 📱")
 
 
@@ -156,8 +151,7 @@ with st.sidebar.expander("➕ AGGIUNGI MEZZO"):
           "storico_interventi": [],
       }
       Garage.salva(dati)
-      st.success("Veicolo aggiunto!")
-      st.rerun()
+      st.success("Veicolo aggiunto! Selezionalo dal menu a tendina.")
     else:
       st.error("Inserisci almeno la Targa!")
 
@@ -174,13 +168,12 @@ with st.sidebar.expander("🗑️ RIMUOVI MEZZO"):
         del dati[targa_del]
         Garage.salva(dati)
         st.success(f"Veicolo {targa_del} rimosso con successo!")
-        st.rerun()
       else:
-        st.warning("Seleziona una targa valida dalla lista.")
+        st.warning("Seleziona una targa valida.")
   else:
-    st.info("Nessun veicolo presente nel garage.")
+    st.info("Nessun veicolo presente.")
 
-# --- SCHERMATA DETTAGLIO VEICOLO ---
+# --- DETTAGLIO VEICOLO ---
 if targa_selezionata and targa_selezionata != "-- Seleziona --":
   v = Garage.assicura_struttura_veicolo(dati[targa_selezionata])
   km = v.get("km_attuali", 0)
@@ -204,8 +197,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
     if col_m2.button("Aggiorna Nome"):
       v["nome_modello"] = mod_nome
       Garage.salva(dati)
-      st.success("Nome aggiornato in MAIUSCOLO!")
-      st.rerun()
+      st.success("Nome aggiornato!")
 
   c_km1, c_km2 = st.columns([3, 1])
   nuovi_km = c_km1.number_input(
@@ -215,13 +207,12 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
     v["km_attuali"] = nuovi_km
     Garage.salva(dati)
     st.success("Km aggiornati!")
-    st.rerun()
 
   st.divider()
 
   col_doc, col_mec = st.columns(2)
 
-  # 1. SCADENZE DOCUMENTI & TERGI
+  # 1. SCADENZE DOCUMENTI
   with col_doc:
     st.subheader("📋 Scadenze Documenti & Tergi")
 
@@ -243,19 +234,18 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
       else:
         c_label.write(f"• **{nome_doc}**: {scad}")
 
-      val_default = datetime.date.today()
       dt_input = c_date.date_input(
           f"Seleziona {nome_doc}",
-          value=val_default,
+          value=datetime.date.today(),
           key=f"dt_{campo}",
           label_visibility="collapsed",
       )
       if c_btn.button("Salva", key=f"btn_{campo}"):
         v[campo] = dt_input.strftime("%d/%m/%Y")
         Garage.salva(dati)
-        st.rerun()
+        st.success(f"{nome_doc} salvata!")
 
-  # 2. STATO MECCANICA E USURA
+  # 2. MECCANICA
   with col_mec:
     st.subheader(f"⚙️ Meccanica (Odom: {km:,} Km)".replace(",", "."))
 
@@ -298,9 +288,8 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
 
   st.divider()
 
-  # 3. INTERVENTI RAPIDI & GOMME
+  # 3. INTERVENTI RAPIDI
   st.subheader("🛠️ Interventi Rapidi Componenti")
-
   col_rap1, col_rap2, col_rap3 = st.columns(3)
 
   with col_rap1:
@@ -319,7 +308,6 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         })
         Garage.salva(dati)
         st.success("Inversione registrata!")
-        st.rerun()
 
   with col_rap2:
     with st.expander("🛞 Cambio Gomme Nuovo"):
@@ -341,7 +329,6 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         })
         Garage.salva(dati)
         st.success("Cambio gomme salvato!")
-        st.rerun()
 
   with col_rap3:
     with st.expander("🛑 Pastiglie / Dischi"):
@@ -370,7 +357,6 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         })
         Garage.salva(dati)
         st.success(f"{nome_c} salvato!")
-        st.rerun()
 
   st.divider()
 
@@ -378,8 +364,6 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
   with st.expander(
       "🛠️ COMPONI TAGLIANDO COMPLETO (OLIO E FILTRI)", expanded=False
   ):
-    st.write("Seleziona i componenti sostituiti durante questo tagliando:")
-
     filtri_tagliando = [
         ("🛢️ Olio Motore", "ultimo_cambio_olio"),
         ("🛢️ Filtro Olio Motore", "ultimo_filtro_olio"),
@@ -453,56 +437,40 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         })
         Garage.salva(dati)
         st.success("Tagliando completo registrato!")
-        st.rerun()
 
   st.divider()
 
-  # 5. NOTE E PROMEMORIA DIARIO
+  # 5. NOTE
   st.subheader("📝 Note e Diario di Bordo")
   oggi_str = datetime.date.today().strftime("%d/%m/%Y")
   ora_str = datetime.datetime.now().strftime("%H:%M")
   note_storiche = v.get("note_storiche", {})
 
-  def aggiungi_nota_oggi_cb():
-    testo = st.session_state.get("txt_nuova_nota", "").strip()
-    if testo:
-      testo_formattato = f"[{oggi_str} alle {ora_str}] {testo}"
-      if "note_storiche" not in dati[targa_selezionata]:
-        dati[targa_selezionata]["note_storiche"] = {}
-
-      cur_notes = dati[targa_selezionata]["note_storiche"]
-      if oggi_str in cur_notes and cur_notes[oggi_str].strip():
-        cur_notes[oggi_str] += f"\n\n{testo_formattato}"
-      else:
-        cur_notes[oggi_str] = testo_formattato
-
-      Garage.salva(dati)
-      st.session_state["txt_nuova_nota"] = ""
-      key_exp = f"txt_note_{oggi_str}"
-      if key_exp in st.session_state:
-        del st.session_state[key_exp]
-
   col_n1, col_n2 = st.columns([3, 1])
-  col_n1.text_area(
-      f"Aggiungi nuova nota per Oggi ({oggi_str})",
-      key="txt_nuova_nota",
-      placeholder="Scrivi qui una nuova nota...",
+  nuova_nota_txt = col_n1.text_area(
+      f"Aggiungi nota per Oggi ({oggi_str})", key="txt_nuova_nota"
   )
-  col_n2.button(
-      "💾 Aggiungi Nota Oggi",
-      key="btn_salva_oggi",
-      on_click=aggiungi_nota_oggi_cb,
-  )
+
+  if col_n2.button("💾 Aggiungi Nota Oggi"):
+    if nuova_nota_txt.strip():
+      testo_formattato = f"[{oggi_str} alle {ora_str}] {nuova_nota_txt.strip()}"
+      if oggi_str in note_storiche and note_storiche[oggi_str].strip():
+        note_storiche[oggi_str] += f"\n\n{testo_formattato}"
+      else:
+        note_storiche[oggi_str] = testo_formattato
+
+      v["note_storiche"] = note_storiche
+      Garage.salva(dati)
+      st.success("Nota salvata con successo!")
 
   if note_storiche:
     with st.expander("📌 Modifica o Elimina Note Passate", expanded=True):
-      date_ordinate = sorted(note_storiche.keys(), reverse=True)
-      for d_nota in date_ordinate:
-        st.markdown(f"### 📅 Data Nota: {d_nota}")
+      for d_nota in sorted(note_storiche.keys(), reverse=True):
+        st.markdown(f"### 📅 Data: {d_nota}")
         col_txt, col_save, col_del = st.columns([3, 1, 1])
 
         txt_mod = col_txt.text_area(
-            f"Testo nota {d_nota}",
+            "Testo Nota",
             value=note_storiche[d_nota],
             key=f"txt_note_{d_nota}",
             label_visibility="collapsed",
@@ -511,26 +479,22 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         if col_save.button("💾 Aggiorna", key=f"btn_save_note_{d_nota}"):
           if txt_mod.strip():
             v["note_storiche"][d_nota] = txt_mod.strip()
-            st.success(f"Nota del {d_nota} aggiornata!")
+            st.success("Nota aggiornata!")
           else:
             del v["note_storiche"][d_nota]
-            st.info(f"Nota del {d_nota} rimossa!")
+            st.info("Nota rimossa!")
           Garage.salva(dati)
-          st.rerun()
 
         if col_del.button("🗑️ Elimina", key=f"btn_del_note_{d_nota}"):
           del v["note_storiche"][d_nota]
-          if f"txt_note_{d_nota}" in st.session_state:
-            del st.session_state[f"txt_note_{d_nota}"]
           Garage.salva(dati)
-          st.success(f"Nota del {d_nota} eliminata!")
-          st.rerun()
+          st.success("Nota eliminata!")
 
         st.divider()
 
   st.divider()
 
-  # 6. STORICO INTERVENTI RAGGRUPPATO PER ANNO
+  # 6. STORICO MANUTENZIONI
   st.subheader("📜 Storico Manutenzioni")
   storico_lista = v.get("storico_interventi", [])
 
@@ -545,7 +509,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
       except:
         anno = "Altro"
 
-      if anno not in interventi_per_anno:
+      if anno not in interveanti_per_anno:
         interventi_per_anno[anno] = []
       interventi_per_anno[anno].append(intv)
 
@@ -561,6 +525,6 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
 
 else:
   st.info(
-      "👈 Seleziona un veicolo dal menu a sinistra o creane uno nuovo per"
-      " iniziare!"
+      "👈 Apri il menu a sinistra (o premi l'icona con la freccetta) per"
+      " selezionare o aggiungere un veicolo!"
   )
