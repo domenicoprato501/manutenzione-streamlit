@@ -1,93 +1,201 @@
 import streamlit as st
 import pandas as pd
+import requests
 import json
-import os
+import firebase_admin
+from firebase_admin import credentials, firestore, auth as admin_auth
 
-# Configurazione Pagina
+# Configurazione della Pagina
 st.set_page_config(page_title="Gestione Manutenzione Veicoli", layout="wide", page_icon="🚗")
 
-NOME_FILE_DATA = "veicoli_data.json"
-NOME_FILE_UTENTI = "utenti.json"
+# ==========================================
+# 1. INIZIALIZZAZIONE FIREBASE
+# ==========================================
+if not firebase_admin._apps:
+    try:
+        # Prende le credenziali da Streamlit Secrets
+        firebase_secrets = dict(st.secrets["firebase"])
+        
+        # Correzione formattazione newline della private_key (necessaria su Streamlit Cloud)
+        if "private_key" in firebase_secrets:
+            firebase_secrets["private_key"] = firebase_secrets["private_key"].replace("\\n", "\n")
+            
+        cred = credentials.Certificate(firebase_secrets)
+        firebase_admin.initialize_app(cred)
+    except Exception as e:
+        st.error(f"Errore durante l'inizializzazione di Firebase Admin: {e}")
+        st.stop()
 
-# --- FUNZIONI DI SUPPORTO ---
+db = firestore.client()
+FIREBASE_API_KEY = st.secrets["firebase"]["api_key"]
+
+# ==========================================
+# 2. FUNZIONI DI SUPPORTO FIREBASE
+# ==========================================
+def login_con_firebase_rest(email, password):
+    """
+    Effettua la verifica della password dell'utente tramite la REST API di Firebase Auth.
+    """
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_API_KEY}"
+    payload = {
+        "email": email,
+        "password": password,
+        "returnSecureToken": True
+    }
+    response = requests.post(url, json=payload)
+    data = response.json()
+    
+    if "error" in data:
+        messaggio_errore = data["error"]["message"]
+        if messaggio_errore in ["EMAIL_NOT_FOUND", "INVALID_PASSWORD", "INVALID_LOGIN_CREDENTIALS"]:
+            raise Exception("Credenziali non valide. Controlla email/username e password.")
+        elif messaggio_errore == "USER_DISABLED":
+            raise Exception("Questo account è stato disabilitato.")
+        else:
+            raise Exception(messaggio_errore)
+            
+    return data
+
+def ottieni_email_da_identificatore(identificatore):
+    """
+    Restituisce l'email associata. Se l'identificatore è già un'email, la restituisce,
+    altrimenti cerca lo username nella collezione 'utenti' di Firestore.
+    """
+    identificatore = identificatore.strip().lower()
+    
+    # Se contiene @ assume sia già un'email
+    if "@" in identificatore:
+        return identificatore
+        
+    # Altrimenti cerca la corrispondenza dello username su Firestore
+    doc_ref = db.collection("utenti").document(identificatore).get()
+    if doc_ref.exists:
+        dati_utente = doc_ref.to_dict()
+        return dati_utente.get("email")
+    else:
+        return None
+
 def format_km(valore):
     try:
         return f"{int(valore):,}".replace(",", ".")
     except (ValueError, TypeError):
         return "0"
 
-def carica_json(file_path):
-    if os.path.exists(file_path):
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-def salva_json(dati, file_path):
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(dati, f, ensure_ascii=False, indent=4)
-
 # Inizializzazione Session State
 if "autenticato" not in st.session_state:
     st.session_state.autenticato = False
 if "utente_corrente" not in st.session_state:
     st.session_state.utente_corrente = None
-
-utenti = carica_json(NOME_FILE_UTENTI)
+if "username_corrente" not in st.session_state:
+    st.session_state.username_corrente = None
 
 # ==========================================
-# 🔑 SCHERMATA LOGIN / REGISTRAZIONE
+# 3. SCHERMATA LOGIN / REGISTRAZIONE
 # ==========================================
 if not st.session_state.autenticato:
     st.title("🚗 Gestione Parco Auto")
     
     tab_login, tab_registrazione = st.tabs(["🔑 Accedi", "📝 Registrati"])
     
+    # --- TAB LOGIN ---
     with tab_login:
         st.subheader("Accedi al tuo account")
-        username_login = st.text_input("Username", key="login_user").strip().lower()
-        password_login = st.text_input("Password", type="password", key="login_pass")
+        input_login = st.text_input("Email o Username", key="login_input").strip().lower()
+        password_login = st.text_input("Password", type="password", key="login_pass").strip()
         
         if st.button("ACCEDI", use_container_width=True):
-            if username_login in utenti and utenti[username_login] == password_login:
-                st.session_state.autenticato = True
-                st.session_state.utente_corrente = username_login
-                st.success("Accesso effettuato!")
-                st.rerun()
+            if not input_login or not password_login:
+                st.error("Inserisci sia l'email/username che la password.")
             else:
-                st.error("Username o Password errati.")
-                
+                try:
+                    # Trova l'email associata (sia se inserito username che email)
+                    email_target = ottieni_email_da_identificatore(input_login)
+                    
+                    if not email_target:
+                        st.error("Username non trovato.")
+                    else:
+                        # Autenticazione tramite Firebase Auth REST API
+                        risultato = login_con_firebase_rest(email_target, password_login)
+                        
+                        # Recupera lo username associato all'email per la sessione
+                        username_trovato = None
+                        utenti_query = db.collection("utenti").where("email", "==", email_target).limit(1).get()
+                        for doc in utenti_query:
+                            username_trovato = doc.id
+                            
+                        st.session_state.autenticato = True
+                        st.session_state.utente_corrente = email_target
+                        st.session_state.username_corrente = username_trovato or email_target
+                        
+                        st.success("Accesso effettuato con successo!")
+                        st.rerun()
+                        
+                except Exception as e:
+                    st.error(f"Errore di accesso: {e}")
+
+    # --- TAB REGISTRAZIONE ---
     with tab_registrazione:
         st.subheader("Crea un nuovo account")
         username_reg = st.text_input("Scegli Username", key="reg_user").strip().lower()
-        password_reg = st.text_input("Scegli Password", type="password", key="reg_pass")
+        email_reg = st.text_input("La tua Email", key="reg_email").strip().lower()
+        password_reg = st.text_input("Scegli Password (min. 6 caratteri)", type="password", key="reg_pass").strip()
         
         if st.button("REGISTRATI", use_container_width=True):
-            if username_reg and password_reg:
-                if username_reg in utenti:
-                    st.error("Questo Username è già esistente.")
-                else:
-                    utenti[username_reg] = password_reg
-                    salva_json(utenti, NOME_FILE_UTENTI)
-                    st.success("Registrazione completata! Ora puoi effettuare l'accesso.")
+            if not username_reg or not email_reg or not password_reg:
+                st.error("Compila tutti i campi richiesti.")
+            elif "@" in username_reg:
+                st.error("Lo username non può contenere il carattere '@'.")
+            elif len(password_reg) < 6:
+                st.error("La password deve contenere almeno 6 caratteri.")
             else:
-                st.error("Inserisci sia Username che Password.")
+                try:
+                    # 1. Verificare se lo username esiste già in Firestore
+                    doc_username = db.collection("utenti").document(username_reg).get()
+                    if doc_username.exists:
+                        st.error("Questo Username è già stato preso. Scegline un altro.")
+                    else:
+                        # 2. Creare l'utente in Firebase Authentication
+                        user_record = admin_auth.create_user(
+                            email=email_reg,
+                            password=password_reg,
+                            display_name=username_reg
+                        )
+                        
+                        # 3. Salvare la mappatura Username -> Email su Firestore
+                        db.collection("utenti").document(username_reg).set({
+                            "email": email_reg,
+                            "uid": user_record.uid
+                        })
+                        
+                        st.success("Registrazione completata con successo! Ora puoi accedere.")
+                        
+                except admin_auth.EmailAlreadyExistsError:
+                    st.error("Questa email è già registrata. Prova ad accedere.")
+                except Exception as e:
+                    st.error(f"Errore durante la registrazione: {e}")
 
 # ==========================================
-# 🚗 APPLICAZIONE PRINCIPALE (Dopo il Login)
+# 4. APPLICAZIONE PRINCIPALE (Dopo il Login)
 # ==========================================
 else:
-    dati = carica_json(NOME_FILE_DATA)
+    # Gestione Dati Veicoli tramite Firestore
+    veicoli_ref = db.collection("veicoli")
     
     # Intestazione e Logout
     col_t, col_out = st.columns([4, 1])
     with col_t:
         st.title("🚗 Gestione Parco Auto & Manutenzioni")
     with col_out:
-        st.write(f"👤 Utente: **{st.session_state.utente_corrente}**")
+        st.write(f"👤 Utente: **{st.session_state.username_corrente}**")
         if st.button("🚪 Esci"):
             st.session_state.autenticato = False
             st.session_state.utente_corrente = None
+            st.session_state.username_corrente = None
             st.rerun()
+
+    # Carica veicoli dal database Firestore
+    docs = veicoli_ref.stream()
+    dati = {doc.id: doc.to_dict() for doc in docs}
 
     # Se non ci sono veicoli salvati
     if not dati:
@@ -101,12 +209,12 @@ else:
             
             if st.form_submit_button("Salva Veicolo"):
                 if nuova_targa:
-                    dati[nuova_targa] = {
+                    nuovo_doc = {
                         "modello": nuovo_modello,
                         "km_attuali": km_iniziali,
                         "storico_interventi": []
                     }
-                    salva_json(dati, NOME_FILE_DATA)
+                    veicoli_ref.document(nuova_targa).set(nuovo_doc)
                     st.success(f"Veicolo {nuova_targa} aggiunto con successo!")
                     st.rerun()
                 else:
@@ -128,12 +236,11 @@ else:
             nuovi_km = st.number_input("Chilometri Attuali", min_value=0, value=int(v.get("km_attuali", 0)), step=100)
             if nuovi_km != v.get("km_attuali"):
                 if st.button("💾 Aggiorna Km"):
-                    v["km_attuali"] = nuovi_km
-                    salva_json(dati, NOME_FILE_DATA)
+                    veicoli_ref.document(targa_selezionata).update({"km_attuali": nuovi_km})
                     st.success("Km aggiornati!")
                     st.rerun()
 
-            # === PULSANTE DOWNLOAD CSV (Compare solo se c'è uno storico) ===
+            # === DOWNLOAD CSV ===
             if storico_lista:
                 st.divider()
                 st.subheader("📊 Esporta Dati")
@@ -178,12 +285,14 @@ else:
                     
                     if st.form_submit_button("SALVA RAPIDO"):
                         if lavoro_r.strip():
-                            v.setdefault("storico_interventi", []).append({
-                                "data": data_r, "km": km_r, "lavoro": lavoro_r, "costo": costo_r
+                            nuovo_int = {"data": data_r, "km": km_r, "lavoro": lavoro_r, "costo": costo_r}
+                            storico_lista.append(nuovo_int)
+                            nuovi_km_attuali = max(km_r, v.get("km_attuali", 0))
+                            
+                            veicoli_ref.document(targa_selezionata).update({
+                                "storico_interventi": storico_lista,
+                                "km_attuali": nuovi_km_attuali
                             })
-                            if km_r > v.get("km_attuali", 0):
-                                v["km_attuali"] = km_r
-                            salva_json(dati, NOME_FILE_DATA)
                             st.success("Intervento salvato!")
                             st.rerun()
                         else:
@@ -209,12 +318,13 @@ else:
                             "lavoro": lavoro_int,
                             "costo": costo_int
                         }
-                        v.setdefault("storico_interventi", []).append(nuovo_registro)
+                        storico_lista.append(nuovo_registro)
+                        nuovi_km_attuali = max(km_int, v.get("km_attuali", 0))
                         
-                        if km_int > v.get("km_attuali", 0):
-                            v["km_attuali"] = km_int
-                            
-                        salva_json(dati, NOME_FILE_DATA)
+                        veicoli_ref.document(targa_selezionata).update({
+                            "storico_interventi": storico_lista,
+                            "km_attuali": nuovi_km_attuali
+                        })
                         st.success("Intervento registrato con successo!")
                         st.rerun()
                     else:
