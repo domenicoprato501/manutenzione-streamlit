@@ -1,6 +1,7 @@
 import json
 import datetime
 import hashlib
+import pandas as pd
 import streamlit as st
 from google.cloud import firestore
 from google.oauth2 import service_account
@@ -76,7 +77,7 @@ def format_km(km_val):
     return f"{km_val:,}".replace(",", ".")
 
 # -----------------------------------------------------------------------------
-# 3. SISTEMA DI LOGIN E REGISTRAZIONE
+# 3. SISTEMA DI LOGIN E REGISTRAZIONE (CON ST.FORM & HASHING)
 # -----------------------------------------------------------------------------
 def check_password():
     if st.session_state.get("password_correct", False):
@@ -103,10 +104,12 @@ def check_password():
                     hashed_input = hash_password(pwd_input)
                     is_valid = False
 
+                    # 1. Controllo utenti nei Secrets
                     if user_input in secrets_passwords:
                         secret_val = str(secrets_passwords[user_input])
                         if secret_val == pwd_input or secret_val == hashed_input:
                             is_valid = True
+                    # 2. Controllo utenti registrati in Firestore
                     elif user_doc.exists:
                         stored_pwd = user_doc.to_dict().get("password")
                         if stored_pwd == hashed_input:
@@ -152,7 +155,6 @@ if not check_password():
 # 4. RIFERIMENTO AL GARAGE DELL'UTENTE CORRENTE
 # -----------------------------------------------------------------------------
 current_user = st.session_state.get("current_user", "Admin")
-# Riferimento dinamico alla sotto-collezione riservata all'utente attivo
 veicoli_user_ref = db.collection("utenti").document(current_user).collection("veicoli")
 
 # -----------------------------------------------------------------------------
@@ -167,7 +169,6 @@ if st.sidebar.button("Logout"):
 
 st.sidebar.divider()
 
-# Recupera solo i veicoli associati a questo specifico utente
 docs = veicoli_user_ref.stream()
 veicoli_dict = {doc.id: doc.to_dict() for doc in docs}
 targhe_list = sorted(list(veicoli_dict.keys()))
@@ -518,13 +519,34 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
 
     st.divider()
 
-    # === 6. SEZIONE STORICO INTERVENTI PER ANNO ===
+    # === 6. SEZIONE STORICO INTERVENTI PER ANNO CON EXPORT CSV ===
     st.subheader("📜 STORICO MANUTENZIONI")
     storico_lista = v.get("storico_interventi", [])
 
     if not storico_lista:
         st.caption("Nessun intervento registrato.")
     else:
+        # Conversione dello storico in DataFrame Pandas per esportazione CSV
+        df_storico = pd.DataFrame(storico_lista)
+        df_csv = df_storico.rename(columns={
+            "data": "Data",
+            "lavoro": "Intervento / Descrizione",
+            "km": "Chilometri (Km)",
+            "costo": "Costo (€)"
+        })[["Data", "Chilometri (Km)", "Intervento / Descrizione", "Costo (€)"]]
+
+        csv_data = df_csv.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="📥 Scarica Storico Manutenzioni in CSV",
+            data=csv_data,
+            file_name=f"storico_manutenzioni_{targa_selezionata}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+        st.divider()
+
         interventi_per_anno = {}
         for intervento in storico_lista:
             data_int = intervento.get("data", "01/01/2026")
