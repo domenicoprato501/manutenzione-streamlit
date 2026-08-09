@@ -1,3 +1,4 @@
+import hashlib
 import json
 import streamlit as st
 from google.cloud import firestore
@@ -27,36 +28,75 @@ def get_db():
 
 db = get_db()
 
+# --- FUNZIONE PER CIFRARE LE PASSWORD ---
+def make_hash(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
 # -----------------------------------------------------------------------------
-# 3. SISTEMA DI AUTENTICAZIONE
+# 3. SISTEMA DI AUTENTICAZIONE (ACCEDI / REGISTRATI)
 # -----------------------------------------------------------------------------
 def check_password():
-    def password_entered():
-        user = st.session_state.get("username", "").strip()
-        pwd = st.session_state.get("password", "").strip()
-        
-        passwords = st.secrets.get("passwords", {})
-        if user in passwords and str(passwords[user]) == pwd:
-            st.session_state["password_correct"] = True
-            st.session_state["current_user"] = user
-            if "password" in st.session_state:
-                del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
     if st.session_state.get("password_correct", False):
         return True
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.title("🔒 Garage Manager Pro")
-        st.subheader("Accedi al gestionale")
-        st.text_input("Username", key="username")
-        st.text_input("Password", type="password", key="password")
-        st.button("Accedi", on_click=password_entered, type="primary", use_container_width=True)
+        
+        tab_login, tab_register = st.tabs(["🔑 Accedi", "📝 Registrati"])
+        
+        # --- SCHEDA ACCEDI ---
+        with tab_login:
+            with st.form("form_login"):
+                user = st.text_input("Username").strip().lower()
+                pwd = st.text_input("Password", type="password").strip()
+                submit_login = st.form_submit_button("Accedi", type="primary", use_container_width=True)
+                
+                if submit_login:
+                    if not user or not pwd:
+                        st.error("⚠️ Inserisci sia Username che Password.")
+                    else:
+                        user_doc = db.collection("utenti").document(user).get()
+                        if user_doc.exists:
+                            user_data = user_doc.to_dict()
+                            if user_data.get("password_hash") == make_hash(pwd):
+                                st.session_state["password_correct"] = True
+                                st.session_state["current_user"] = user_data.get("nome", user)
+                                st.rerun()
+                            else:
+                                st.error("❌ Password errata.")
+                        else:
+                            st.error("❌ Username non trovato.")
 
-        if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-            st.error("❌ Username o password non validi")
+        # --- SCHEDA REGISTRATI ---
+        with tab_register:
+            with st.form("form_register"):
+                new_user = st.text_input("Scegli un Username *").strip().lower()
+                new_name = st.text_input("Nome e Cognome *").strip()
+                new_pwd = st.text_input("Password *", type="password").strip()
+                confirm_pwd = st.text_input("Conferma Password *", type="password").strip()
+                
+                submit_reg = st.form_submit_button("Crea Account", use_container_width=True)
+                
+                if submit_reg:
+                    if not new_user or not new_name or not new_pwd:
+                        st.error("⚠️ Compila tutti i campi obbligatori.")
+                    elif new_pwd != confirm_pwd:
+                        st.error("❌ Le password non coincidono.")
+                    elif len(new_pwd) < 6:
+                        st.error("⚠️ La password deve contenere almeno 6 caratteri.")
+                    else:
+                        user_ref = db.collection("utenti").document(new_user)
+                        if user_ref.get().exists:
+                            st.error("❌ Questo Username è già utilizzato.")
+                        else:
+                            user_ref.set({
+                                "username": new_user,
+                                "nome": new_name,
+                                "password_hash": make_hash(new_pwd),
+                                "ruolo": "Meccanico"
+                            })
+                            st.success("✅ Account creato con successo! Ora puoi accedere dalla scheda 'Accedi'.")
 
     return False
 
@@ -148,7 +188,6 @@ elif menu == "➕ Nuovo Intervento":
                 }
                 
                 if doc.exists:
-                    # Aggiorna veicolo esistente aggiungendo l'intervento alla lista
                     doc_ref.update({
                         "km": km,
                         "telefono": telefono,
@@ -156,7 +195,6 @@ elif menu == "➕ Nuovo Intervento":
                     })
                     st.success(f"✅ Nuovo intervento aggiunto al veicolo con targa {targa}!")
                 else:
-                    # Crea un nuovo documento veicolo
                     doc_ref.set({
                         "targa": targa,
                         "cliente": cliente,
