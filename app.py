@@ -118,37 +118,18 @@ if st.sidebar.button("Logout", use_container_width=True):
 st.sidebar.divider()
 menu = st.sidebar.radio("Menu", ["📋 Registro Veicoli", "➕ Nuovo Intervento", "🔍 Ricerca Targa"])
 
-# -----------------------------------------------------------------------------
-# 5. SCHERMATA: REGISTRO VEICOLI & ESPORTAZIONE DATI
-# -----------------------------------------------------------------------------
-if menu == "📋 Registro Veicoli":
-    st.title("📋 Registro Veicoli & Interventi")
-    
-    docs = db.collection("veicoli").stream()
-    veicoli_list = [doc.to_dict() for doc in docs]
-    
-    if not veicoli_list:
-        st.info("Nessun veicolo presente nel database. Aggiungi il primo intervento dal menu a sinistra.")
-    else:
-        # --- PREPARAZIONE DATI PER ESPORTAZIONE ---
-        rows = []
-        for v in veicoli_list:
-            interventi = v.get("interventi", [])
-            if interventi:
-                for i in interventi:
-                    rows.append({
-                        "Targa": v.get("targa", ""),
-                        "Marca": v.get("marca", ""),
-                        "Modello": v.get("modello", ""),
-                        "Cliente": v.get("cliente", ""),
-                        "Telefono": v.get("telefono", ""),
-                        "Km Attuali": v.get("km", 0),
-                        "Data Intervento": i.get("data", ""),
-                        "Descrizione Lavori": i.get("descrizione", ""),
-                        "Costo (€)": i.get("costo", 0.0),
-                        "Operatore": i.get("operatore", "")
-                    })
-            else:
+# --- ESPORTAZIONE DATI IN SIDEBAR ---
+st.sidebar.divider()
+st.sidebar.subheader("📥 Esporta Dati")
+docs_exp = db.collection("veicoli").stream()
+veicoli_exp = [doc.to_dict() for doc in docs_exp]
+
+if veicoli_exp:
+    rows = []
+    for v in veicoli_exp:
+        interventi = v.get("interventi", [])
+        if interventi:
+            for i in interventi:
                 rows.append({
                     "Targa": v.get("targa", ""),
                     "Marca": v.get("marca", ""),
@@ -156,68 +137,92 @@ if menu == "📋 Registro Veicoli":
                     "Cliente": v.get("cliente", ""),
                     "Telefono": v.get("telefono", ""),
                     "Km Attuali": v.get("km", 0),
-                    "Data Intervento": "Nessun intervento",
-                    "Descrizione Lavori": "-",
-                    "Costo (€)": 0.0,
-                    "Operatore": "-"
+                    "Data Intervento": i.get("data", ""),
+                    "Descrizione Lavori": i.get("descrizione", ""),
+                    "Costo (€)": i.get("costo", 0.0),
+                    "Operatore": i.get("operatore", "")
                 })
+        else:
+            rows.append({
+                "Targa": v.get("targa", ""),
+                "Marca": v.get("marca", ""),
+                "Modello": v.get("modello", ""),
+                "Cliente": v.get("cliente", ""),
+                "Telefono": v.get("telefono", ""),
+                "Km Attuali": v.get("km", 0),
+                "Data Intervento": "Nessun intervento",
+                "Descrizione Lavori": "-",
+                "Costo (€)": 0.0,
+                "Operatore": "-"
+            })
 
-        df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
 
-        # --- SEZIONE PULSANTI DOWNLOAD ---
-        st.subheader("📥 Esporta Registro")
-        col_dl1, col_dl2, _ = st.columns([1, 1, 2])
+    # Download CSV
+    csv_data = df.to_csv(index=False).encode('utf-8')
+    st.sidebar.download_button(
+        label="📄 Scarica CSV",
+        data=csv_data,
+        file_name="registro_veicoli.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
 
-        # 1. Download CSV
-        csv_data = df.to_csv(index=False).encode('utf-8')
-        col_dl1.download_button(
-            label="📄 Scarica in CSV",
-            data=csv_data,
-            file_name="registro_veicoli.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+    # Download Excel
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name="Registro Veicoli")
+    
+    st.sidebar.download_button(
+        label="📊 Scarica Excel",
+        data=buffer.getvalue(),
+        file_name="registro_veicoli.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
 
-        # 2. Download Excel (.xlsx)
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name="Registro Veicoli")
-        
-        col_dl2.download_button(
-            label="📊 Scarica in Excel",
-            data=buffer.getvalue(),
-            file_name="registro_veicoli.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
-        st.divider()
-
-        # --- VISUALIZZAZIONE SCHEDE VEICOLI ---
-        st.subheader("🚘 Schede Veicoli")
+# -----------------------------------------------------------------------------
+# 5. SCHERMATA: REGISTRO VEICOLI
+# -----------------------------------------------------------------------------
+if menu == "📋 Registro Veicoli":
+    st.title("📋 Registro Veicoli & Manutenzioni")
+    
+    docs = db.collection("veicoli").stream()
+    veicoli_list = [doc.to_dict() for doc in docs]
+    
+    if not veicoli_list:
+        st.info("Nessun veicolo presente nel database. Aggiungi il primo intervento dal menu a sinistra.")
+    else:
         for v in veicoli_list:
-            with st.expander(f"🚘 {v.get('targa', 'N/A')} - {v.get('marca', '')} {v.get('modello', '')} ({v.get('cliente', 'Cliente sconosciuto')})"):
+            with st.expander(f"🚘 {v.get('targa', 'N/A')} — {v.get('marca', '')} {v.get('modello', '')} ({v.get('cliente', 'Cliente sconosciuto')})"):
                 col1, col2, col3 = st.columns(3)
-                col1.write(f"**Cliente:** {v.get('cliente', '-')}")
-                col2.write(f"**Telefono:** {v.get('telefono', '-')}")
-                col3.write(f"**Km Attuali:** {v.get('km', '-')}")
+                col1.write(f"👤 **Cliente:** {v.get('cliente', '-')}")
+                col2.write(f"📞 **Telefono:** {v.get('telefono', '-')}")
+                col3.write(f"📉 **Km Attuali:** {v.get('km', '-')}")
                 
-                st.markdown("##### 🛠️ Cronologia Interventi")
+                st.write("")
+                st.subheader("🛠️ Schede Manutenzioni Eseguite")
+                
                 interventi = v.get("interventi", [])
                 if interventi:
-                    for i in reversed(interventi):
-                        st.caption(f"📅 **Data:** {i.get('data')} | **Operatore:** {i.get('operatore')}")
-                        st.write(f"**Descrizione:** {i.get('descrizione')}")
-                        st.write(f"**Costo:** {i.get('costo')} €")
-                        st.divider()
+                    # Per ogni intervento viene creata una scheda/box separata
+                    for idx, i in enumerate(reversed(interventi), 1):
+                        with st.container(border=True):
+                            c1, c2 = st.columns([3, 1])
+                            c1.markdown(f"#### 🛠️ Manutenzione #{len(interventi) - idx + 1}")
+                            c2.markdown(f"💶 **Costo:** `{i.get('costo', 0.0)} €`")
+                            
+                            st.write(f"📅 **Data Lavoro:** {i.get('data', '-')}")
+                            st.write(f"👨‍🔧 **Operatore:** {i.get('operatore', 'N/D')}")
+                            st.markdown(f"**Descrizione Intervento:**\n{i.get('descrizione', '-')}")
                 else:
-                    st.write("Nessun intervento registrato.")
+                    st.info("Nessuna manutenzione registrata per questo veicolo.")
 
 # -----------------------------------------------------------------------------
 # 6. SCHERMATA: NUOVO INTERVENTO / NUOVO VEICOLO
 # -----------------------------------------------------------------------------
 elif menu == "➕ Nuovo Intervento":
-    st.title("➕ Registra Veicolo o Intervento")
+    st.title("➕ Registra Veicolo o Manutenzione")
     
     with st.form("form_intervento", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -230,7 +235,7 @@ elif menu == "➕ Nuovo Intervento":
         telefono = col5.text_input("Telefono")
         
         st.divider()
-        st.subheader("Dettagli Lavoro")
+        st.subheader("Dettagli Manutenzione")
         col6, col7, col8 = st.columns(3)
         data_intervento = col6.date_input("Data Intervento")
         km = col7.number_input("Chilometraggio Auto", min_value=0, step=1000)
@@ -260,7 +265,7 @@ elif menu == "➕ Nuovo Intervento":
                         "telefono": telefono,
                         "interventi": firestore.ArrayUnion([nuovo_intervento])
                     })
-                    st.success(f"✅ Nuovo intervento aggiunto al veicolo con targa {targa}!")
+                    st.success(f"✅ Nuova scheda manutenzione aggiunta al veicolo {targa}!")
                 else:
                     doc_ref.set({
                         "targa": targa,
@@ -271,7 +276,7 @@ elif menu == "➕ Nuovo Intervento":
                         "km": km,
                         "interventi": [nuovo_intervento]
                     })
-                    st.success(f"✅ Veicolo {targa} e relativo intervento salvati con successo!")
+                    st.success(f"✅ Veicolo {targa} e relativa scheda manutenzione salvati!")
 
 # -----------------------------------------------------------------------------
 # 7. SCHERMATA: RICERCA TARGA
@@ -294,8 +299,17 @@ elif menu == "🔍 Ricerca Targa":
             col1.metric("Telefono", v.get("telefono"))
             col2.metric("Ultimi Km Registrati", f"{v.get('km')} km")
             
-            st.subheader("Interventi Effettuati")
-            for i in reversed(v.get("interventi", [])):
-                st.info(f"📅 **{i.get('data')}** — Costo: **{i.get('costo')} €**\n\n{i.get('descrizione')}")
+            st.subheader("🛠️ Schede Manutenzioni")
+            interventi = v.get("interventi", [])
+            if interventi:
+                for idx, i in enumerate(reversed(interventi), 1):
+                    with st.container(border=True):
+                        c1, c2 = st.columns([3, 1])
+                        c1.markdown(f"#### 🛠️ Intervento del {i.get('data')}")
+                        c2.markdown(f"💶 **Costo:** `{i.get('costo')} €`")
+                        st.write(f"👨‍🔧 **Operatore:** {i.get('operatore', 'N/D')}")
+                        st.markdown(f"**Descrizione Lavori:**\n{i.get('descrizione')}")
+            else:
+                st.info("Nessuna manutenzione presente per questa targa.")
         else:
             st.warning(f"Nessun veicolo trovato con la targa **{search_targa}**.")
