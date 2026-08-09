@@ -1,5 +1,6 @@
 import json
 import datetime
+import hashlib
 import streamlit as st
 from google.cloud import firestore
 from google.oauth2 import service_account
@@ -29,74 +30,12 @@ def get_db():
 db = get_db()
 
 # -----------------------------------------------------------------------------
-# 3. SISTEMA DI LOGIN
+# FUNZIONI DI SUPPORTO & HASHING
 # -----------------------------------------------------------------------------
-def check_password():
-    if st.session_state.get("password_correct", False):
-        return True
+def hash_password(password: str) -> str:
+    """Restituisce l'hash SHA-256 della password."""
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
-    st.title("🔒 Accesso a Garage Manager Pro 📱")
-    
-    # Tab per separare Login e Registrazione
-    tab_login, tab_register = st.tabs(["🔑 Accedi", "📝 Registrati"])
-
-    # --- TAB LOGIN ---
-    with tab_login:
-        user_input = st.text_input("Username", key="login_user").strip()
-        pwd_input = st.text_input("Password", type="password", key="login_pwd").strip()
-        
-        if st.button("Accedi", use_container_width=True):
-            # 1. Controlla prima nei secrets (utenti admin hardcoded)
-            secrets_passwords = st.secrets.get("passwords", {})
-            
-            # 2. Controlla nel database Firestore
-            user_doc = db.collection("utenti").document(user_input).get()
-            
-            is_valid = False
-            if user_input in secrets_passwords and str(secrets_passwords[user_input]) == pwd_input:
-                is_valid = True
-            elif user_doc.exists and user_doc.to_dict().get("password") == pwd_input:
-                is_valid = True
-
-            if is_valid:
-                st.session_state["password_correct"] = True
-                st.session_state["current_user"] = user_input
-                st.rerun()
-            else:
-                st.error("❌ Username o password errati")
-
-    # --- TAB REGISTRAZIONE ---
-    with tab_register:
-        new_user = st.text_input("Scegli un Username", key="reg_user").strip()
-        new_pwd = st.text_input("Scegli una Password", type="password", key="reg_pwd").strip()
-        confirm_pwd = st.text_input("Conferma Password", type="password", key="reg_pwd_confirm").strip()
-        
-        if st.button("Crea Account", type="primary", use_container_width=True):
-            if not new_user or not new_pwd:
-                st.warning("Compila tutti i campi!")
-            elif new_pwd != confirm_pwd:
-                st.error("❌ Le password non coincidono")
-            else:
-                # Verifica se l'utente esiste già su Firestore
-                user_ref = db.collection("utenti").document(new_user)
-                if user_ref.get().exists or new_user in st.secrets.get("passwords", {}):
-                    st.error("❌ Questo username è già esistente. Scegli un altro nome.")
-                else:
-                    # Salva il nuovo utente su Firestore
-                    user_ref.set({
-                        "password": new_pwd,
-                        "data_creazione": datetime.date.today().strftime("%d/%m/%Y")
-                    })
-                    st.success("✅ Account creato con successo! Ora puoi effettuare l'accesso dal tab 'Accedi'.")
-
-    return False
-
-if not check_password():
-    st.stop()
-
-# -----------------------------------------------------------------------------
-# 4. STRUTTURA DATI & FUNZIONI DI SUPPORTO
-# -----------------------------------------------------------------------------
 def get_default_vehicle_data():
     return {
         "modello": "Non specificato",
@@ -137,21 +76,103 @@ def format_km(km_val):
     return f"{km_val:,}".replace(",", ".")
 
 # -----------------------------------------------------------------------------
-# 5. SIDEBAR: LISTA VEICOLI
+# 3. SISTEMA DI LOGIN E REGISTRAZIONE
+# -----------------------------------------------------------------------------
+def check_password():
+    if st.session_state.get("password_correct", False):
+        return True
+
+    st.title("🔒 Accesso a Garage Manager Pro 📱")
+    
+    tab_login, tab_register = st.tabs(["🔑 Accedi", "📝 Registrati"])
+
+    # --- TAB LOGIN ---
+    with tab_login:
+        with st.form("form_login"):
+            user_input = st.text_input("Username", key="login_user").strip()
+            pwd_input = st.text_input("Password", type="password", key="login_pwd").strip()
+            submit_login = st.form_submit_button("Accedi", use_container_width=True)
+            
+            if submit_login:
+                if not user_input or not pwd_input:
+                    st.warning("Compila tutti i campi!")
+                else:
+                    secrets_passwords = st.secrets.get("passwords", {})
+                    user_doc = db.collection("utenti").document(user_input).get()
+                    
+                    hashed_input = hash_password(pwd_input)
+                    is_valid = False
+
+                    if user_input in secrets_passwords:
+                        secret_val = str(secrets_passwords[user_input])
+                        if secret_val == pwd_input or secret_val == hashed_input:
+                            is_valid = True
+                    elif user_doc.exists:
+                        stored_pwd = user_doc.to_dict().get("password")
+                        if stored_pwd == hashed_input:
+                            is_valid = True
+
+                    if is_valid:
+                        st.session_state["password_correct"] = True
+                        st.session_state["current_user"] = user_input
+                        st.rerun()
+                    else:
+                        st.error("❌ Username o password errati")
+
+    # --- TAB REGISTRAZIONE ---
+    with tab_register:
+        with st.form("form_register"):
+            new_user = st.text_input("Scegli un Username", key="reg_user").strip()
+            new_pwd = st.text_input("Scegli una Password", type="password", key="reg_pwd").strip()
+            confirm_pwd = st.text_input("Conferma Password", type="password", key="reg_pwd_confirm").strip()
+            submit_reg = st.form_submit_button("Crea Account", type="primary", use_container_width=True)
+            
+            if submit_reg:
+                if not new_user or not new_pwd or not confirm_pwd:
+                    st.warning("Compila tutti i campi!")
+                elif new_pwd != confirm_pwd:
+                    st.error("❌ Le password non coincidono")
+                else:
+                    user_ref = db.collection("utenti").document(new_user)
+                    if user_ref.get().exists or new_user in st.secrets.get("passwords", {}):
+                        st.error("❌ Questo username è già esistente. Scegli un altro nome.")
+                    else:
+                        user_ref.set({
+                            "password": hash_password(new_pwd),
+                            "data_creazione": datetime.date.today().strftime("%d/%m/%Y")
+                        })
+                        st.success("✅ Account creato con successo! Ora puoi effettuare l'accesso dal tab 'Accedi'.")
+
+    return False
+
+if not check_password():
+    st.stop()
+
+# -----------------------------------------------------------------------------
+# 4. RIFERIMENTO AL GARAGE DELL'UTENTE CORRENTE
+# -----------------------------------------------------------------------------
+current_user = st.session_state.get("current_user", "Admin")
+# Riferimento dinamico alla sotto-collezione riservata all'utente attivo
+veicoli_user_ref = db.collection("utenti").document(current_user).collection("veicoli")
+
+# -----------------------------------------------------------------------------
+# 5. SIDEBAR: LISTA VEICOLI PERSONALI
 # -----------------------------------------------------------------------------
 st.sidebar.title("Garage Manager Pro 📱")
-st.sidebar.write(f"👤 Utente: **{st.session_state.get('current_user', 'Admin')}**")
+st.sidebar.write(f"👤 Utente: **{current_user}**")
 if st.sidebar.button("Logout"):
     st.session_state["password_correct"] = False
+    st.session_state["current_user"] = None
     st.rerun()
 
 st.sidebar.divider()
 
-docs = db.collection("veicoli").stream()
+# Recupera solo i veicoli associati a questo specifico utente
+docs = veicoli_user_ref.stream()
 veicoli_dict = {doc.id: doc.to_dict() for doc in docs}
 targhe_list = sorted(list(veicoli_dict.keys()))
 
-st.sidebar.subheader("🚗 Lista Veicoli")
+st.sidebar.subheader("🚗 I Miei Veicoli")
 targa_selezionata = st.sidebar.selectbox("Seleziona un mezzo", options=["-- Seleziona --"] + targhe_list)
 
 with st.sidebar.expander("➕ / 🗑️ Gestisci Mezzi"):
@@ -160,27 +181,27 @@ with st.sidebar.expander("➕ / 🗑️ Gestisci Mezzi"):
     if st.button("➕ AGGIUNGI MEZZO", use_container_width=True):
         if nuova_targa:
             if nuova_targa in veicoli_dict:
-                st.warning("Esiste già!")
+                st.warning("Hai già un veicolo con questa targa!")
             else:
                 dati_v = get_default_vehicle_data()
                 dati_v["modello"] = nuovo_modello if nuovo_modello else "Non specificato"
-                db.collection("veicoli").document(nuova_targa).set(dati_v)
-                st.success(f"Veicolo {nuova_targa} aggiunto!")
+                veicoli_user_ref.document(nuova_targa).set(dati_v)
+                st.success(f"Veicolo {nuova_targa} aggiunto al tuo garage!")
                 st.rerun()
 
     st.divider()
     targa_elimina = st.text_input("Scrivi targa da eliminare").upper().strip()
     if st.button("🗑️ RIMUOVI MEZZO", type="primary", use_container_width=True):
         if targa_elimina in veicoli_dict:
-            db.collection("veicoli").document(targa_elimina).delete()
-            st.success(f"Veicolo {targa_elimina} rimosso!")
+            veicoli_user_ref.document(targa_elimina).delete()
+            st.success(f"Veicolo {targa_elimina} rimosso dal tuo garage!")
             st.rerun()
 
 # -----------------------------------------------------------------------------
 # 6. SCHERMATA DETTAGLIO VEICOLO
 # -----------------------------------------------------------------------------
 if targa_selezionata and targa_selezionata != "-- Seleziona --":
-    v_ref = db.collection("veicoli").document(targa_selezionata)
+    v_ref = veicoli_user_ref.document(targa_selezionata)
     v = v_ref.get().to_dict() or get_default_vehicle_data()
     km = v.get("km_attuali", 0)
     modello_v = v.get("modello", "Non specificato")
@@ -269,7 +290,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
     # === 3. SEZIONE INTERVENTI RAPIDI ===
     st.subheader("=== INTERVENTI RAPIDI ===")
 
-    # Riga 1: Aggiorna KM e Modello
+    # Aggiorna KM / Modello
     with st.popover("📊 AGGIORNA KM / MODELLO", use_container_width=True):
         n_km = st.number_input("Chilometri attuali", value=km, step=100)
         n_mod = st.text_input("Modello Veicolo", value=modello_v)
@@ -279,7 +300,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
             v_ref.set(v)
             st.rerun()
 
-    # Riga Nuova: Intervento Straordinario / Generico Libero
+    # Intervento Straordinario
     with st.popover("🛠️ INTERVENTO GENERICO / STRAORDINARIO", use_container_width=True):
         titolo_straord = st.text_input("Titolo Intervento (es. Cinghia Distribuzione, Batteria)")
         costo_straord = st.number_input("Costo (€)", min_value=0.0, value=0.0, step=10.0)
@@ -304,7 +325,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
             else:
                 st.warning("Inserisci almeno il titolo dell'intervento!")
 
-    # Riga 2: Inversione e Cambio Gomme
+    # Inversione e Cambio Gomme
     c1, c2 = st.columns(2)
     with c1:
         with st.popover("🔄 INVERSIONE", use_container_width=True):
@@ -334,7 +355,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                 v_ref.set(v)
                 st.rerun()
 
-    # Riga 3: Tergicristalli
+    # Tergicristalli
     c3, c4 = st.columns(2)
     with c3:
         with st.popover("🧹 TERGI ANT", use_container_width=True):
@@ -351,7 +372,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                 v_ref.set(v)
                 st.rerun()
 
-    # Riga 4: Pastiglie
+    # Pastiglie
     c5, c6 = st.columns(2)
     for col, nome, campo in [(c5, "🛑 PAST. ANT", "pastiglie_anteriori"), (c6, "🛑 PAST. POST", "pastiglie_posteriori")]:
         with col:
@@ -367,7 +388,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                     v_ref.set(v)
                     st.rerun()
 
-    # Riga 5: Dischi
+    # Dischi
     c7, c8 = st.columns(2)
     for col, nome, campo in [(c7, "💿 DISCHI ANT", "dischi_anteriori"), (c8, "💿 DISCHI POST", "dischi_posteriore")]:
         with col:
@@ -383,7 +404,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                     v_ref.set(v)
                     st.rerun()
 
-    # Riga 6: Documenti (Rev, Bollo, Assic, Bombole)
+    # Documenti
     c9, c10, c11, c12 = st.columns(4)
     doc_buttons = [
         (c9, "📅 REV", "scadenza_revisione"),
@@ -527,4 +548,4 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                 st.info(f"🔧 **{lavoro_int}**\n\nData: {data_int} | Km: {format_km(km_int)} | Spesa: {costo_int:.2f}€")
 
 else:
-    st.info("👈 Seleziona un veicolo dal menu a sinistra per accedere alla scheda.")
+    st.info("👈 Seleziona un veicolo dal menu a sinistra per accedere alla tua scheda personale.")
