@@ -1,7 +1,8 @@
 import datetime
 import json
-import os
 import streamlit as st
+from google.cloud import firestore
+from google.oauth2 import service_account
 
 # 1. CONFIGURAZIONE PAGINA
 st.set_page_config(
@@ -26,25 +27,44 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-FILE_DATI = "dati_veicoli_multipli.json"
+# 3. CONNESSIONE A GOOGLE CLOUD FIRESTORE
+@st.cache_resource
+def get_db():
+  try:
+    key_dict = json.loads(st.secrets["firestore"]["text_key"])
+    creds = service_account.Credentials.from_service_account_info(key_dict)
+    return firestore.Client(credentials=creds)
+  except Exception as e:
+    st.error(
+        "❌ Errore di connessione a Firestore. Controlla di aver inserito i"
+        " Segreti su Streamlit!"
+    )
+    st.stop()
 
 
-class Garage:
+db = get_db()
+
+
+class GarageCloud:
 
   @staticmethod
   def carica():
-    if not os.path.exists(FILE_DATI) or os.path.getsize(FILE_DATI) == 0:
-      return {}
-    try:
-      with open(FILE_DATI, "r", encoding="utf-8") as f:
-        return json.load(f)
-    except:
-      return {}
+    """Scarica tutti i veicoli dal Cloud Firestore."""
+    docs = db.collection("veicoli").stream()
+    dati = {}
+    for doc in docs:
+      dati[doc.id] = doc.to_dict()
+    return dati
 
   @staticmethod
-  def salva(dati):
-    with open(FILE_DATI, "w", encoding="utf-8") as f:
-      json.dump(dati, f, indent=4, ensure_ascii=False)
+  def salva_veicolo(targa, dati_veicolo):
+    """Salva/Aggiorna un singolo veicolo nel Cloud."""
+    db.collection("veicoli").document(targa).set(dati_veicolo)
+
+  @staticmethod
+  def elimina_veicolo(targa):
+    """Elimina un veicolo dal Cloud."""
+    db.collection("veicoli").document(targa).delete()
 
   @staticmethod
   def giorni_a_scadenza(data_str):
@@ -88,10 +108,11 @@ class Garage:
     return v
 
 
-dati = Garage.carica()
+# Carica i dati dal Cloud
+dati = GarageCloud.carica()
 
 for k in list(dati.keys()):
-  Garage.assicura_struttura_veicolo(dati[k])
+  GarageCloud.assicura_struttura_veicolo(dati[k])
 
 # --- BARRA LATERALE ---
 st.sidebar.title("Garage Manager Pro 📱")
@@ -124,7 +145,7 @@ with st.sidebar.expander("➕ AGGIUNGI MEZZO"):
     if nuova_targa in dati:
       st.error("Targa già esistente!")
     elif nuova_targa:
-      dati[nuova_targa] = {
+      nuovo_v = {
           "nome_modello": (
               nuovo_modello if nuovo_modello else "NON SPECIFICATO"
           ),
@@ -150,8 +171,8 @@ with st.sidebar.expander("➕ AGGIUNGI MEZZO"):
           "note_storiche": {},
           "storico_interventi": [],
       }
-      Garage.salva(dati)
-      st.success("Veicolo aggiunto!")
+      GarageCloud.salva_veicolo(nuova_targa, nuovo_v)
+      st.success("Veicolo aggiunto al Cloud!")
       st.rerun()
     else:
       st.error("Inserisci la Targa!")
@@ -166,47 +187,13 @@ with st.sidebar.expander("🗑️ RIMUOVI MEZZO"):
     )
     if st.button("Conferma Elimina", type="primary"):
       if targa_del != "-- Seleziona --" and targa_del in dati:
-        del dati[targa_del]
-        Garage.salva(dati)
-        st.success(f"Veicolo {targa_del} rimosso!")
+        GarageCloud.elimina_veicolo(targa_del)
+        st.success(f"Veicolo {targa_del} rimosso dal Cloud!")
         st.rerun()
       else:
         st.warning("Seleziona una targa valida.")
   else:
     st.info("Nessun veicolo presente.")
-
-st.sidebar.divider()
-
-# --- BACKUP & RIPRISTINO DATI ---
-with st.sidebar.expander("💾 BACKUP & RIPRISTINO"):
-  st.caption("Scarica una copia dei tuoi dati per non perderli mai.")
-
-  # Pulsante Download Backup
-  stringa_json = json.dumps(dati, indent=4, ensure_ascii=False)
-  st.download_button(
-      label="📥 Scarica Backup Dati",
-      data=stringa_json,
-      file_name=f"backup_garage_{datetime.date.today().strftime('%Y%m%d')}.json",
-      mime="application/json",
-  )
-
-  st.divider()
-
-  # Caricamento Backup
-  st.caption("Ripristina i dati da un file salvato:")
-  file_caricato = st.file_uploader(
-      "Scegli file di backup", type=["json"], label_visibility="collapsed"
-  )
-
-  if file_caricato is not None:
-    if st.button("🔄 Ripristina Dati"):
-      try:
-        dati_ripristinati = json.load(file_caricato)
-        Garage.salva(dati_ripristinati)
-        st.success("Dati ripristinati con successo!")
-        st.rerun()
-      except Exception as e:
-        st.error("File di backup non valido.")
 
 st.sidebar.divider()
 
@@ -216,19 +203,16 @@ with st.sidebar.expander("❓ AIUTO & ASSISTENZA"):
       """
     **Hai bisogno di aiuto?**
     
-    Se riscontri problemi o hai perso i tuoi dati, contattaci:
+    Tutti i tuoi dati vengono ora salvati **automaticamente in Cloud**.
     
     * 📧 **Email:** supporto@tuodominio.it
     * 💬 **WhatsApp:** +39 333 1234567
-    
-    *Consiglio:* Fai un backup periodico dalla sezione **BACKUP & RIPRISTINO** qui sopra.
     """
   )
 
-
 # --- DETTAGLIO VEICOLO ---
 if targa_selezionata and targa_selezionata != "-- Seleziona --":
-  v = Garage.assicura_struttura_veicolo(dati[targa_selezionata])
+  v = GarageCloud.assicura_struttura_veicolo(dati[targa_selezionata])
   km = v.get("km_attuali", 0)
 
   modello_str = (
@@ -249,7 +233,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
     )
     if col_m2.button("Aggiorna Nome"):
       v["nome_modello"] = mod_nome
-      Garage.salva(dati)
+      GarageCloud.salva_veicolo(targa_selezionata, v)
       st.success("Nome aggiornato!")
       st.rerun()
 
@@ -259,8 +243,8 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
   )
   if c_km2.button("💾 AGGIORNA KM"):
     v["km_attuali"] = nuovi_km
-    Garage.salva(dati)
-    st.success("Km aggiornati!")
+    GarageCloud.salva_veicolo(targa_selezionata, v)
+    st.success("Km aggiornati nel Cloud!")
     st.rerun()
 
   st.divider()
@@ -281,7 +265,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
 
     for nome_doc, campo in doc_list:
       scad = v.get(campo, "Non inserita")
-      giorni = Garage.giorni_a_scadenza(scad)
+      giorni = GarageCloud.giorni_a_scadenza(scad)
 
       c_label, c_date, c_btn = st.columns([2, 2, 1])
       if giorni is not None and giorni < 0:
@@ -297,7 +281,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
       )
       if c_btn.button("Salva", key=f"btn_{campo}"):
         v[campo] = dt_input.strftime("%d/%m/%Y")
-        Garage.salva(dati)
+        GarageCloud.salva_veicolo(targa_selezionata, v)
         st.success(f"{nome_doc} salvata!")
         st.rerun()
 
@@ -362,7 +346,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
             "km": km,
             "costo": costo_inv,
         })
-        Garage.salva(dati)
+        GarageCloud.salva_veicolo(targa_selezionata, v)
         st.success("Inversione registrata!")
         st.rerun()
 
@@ -384,7 +368,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
             "km": km,
             "costo": costo_g,
         })
-        Garage.salva(dati)
+        GarageCloud.salva_veicolo(targa_selezionata, v)
         st.success("Cambio gomme salvato!")
         st.rerun()
 
@@ -413,7 +397,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
             "km": km,
             "costo": costo_p,
         })
-        Garage.salva(dati)
+        GarageCloud.salva_veicolo(targa_selezionata, v)
         st.success(f"{nome_c} salvato!")
         st.rerun()
 
@@ -494,8 +478,8 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
             "km": km,
             "costo": costo_totale,
         })
-        Garage.salva(dati)
-        st.success("Tagliando completo registrato!")
+        GarageCloud.salva_veicolo(targa_selezionata, v)
+        st.success("Tagliando completo registrato nel Cloud!")
         st.rerun()
 
   st.divider()
@@ -520,8 +504,8 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
         note_storiche[oggi_str] = testo_formattato
 
       v["note_storiche"] = note_storiche
-      Garage.salva(dati)
-      st.success("Nota salvata con successo!")
+      GarageCloud.salva_veicolo(targa_selezionata, v)
+      st.success("Nota salvata nel Cloud!")
       st.rerun()
 
   if note_storiche:
@@ -544,12 +528,12 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
           else:
             del v["note_storiche"][d_nota]
             st.info("Nota rimossa!")
-          Garage.salva(dati)
+          GarageCloud.salva_veicolo(targa_selezionata, v)
           st.rerun()
 
         if col_del.button("🗑️ Elimina", key=f"btn_del_note_{d_nota}"):
           del v["note_storiche"][d_nota]
-          Garage.salva(dati)
+          GarageCloud.salva_veicolo(targa_selezionata, v)
           st.success("Nota eliminata!")
           st.rerun()
 
@@ -588,6 +572,5 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
 
 else:
   st.info(
-      "👈 Apri il menu a sinistra (in alto a sinistra sul telefono) per"
-      " selezionare o aggiungere un veicolo!"
+      "👈 Apri il menu a sinistra per selezionare o aggiungere un veicolo!"
   )
