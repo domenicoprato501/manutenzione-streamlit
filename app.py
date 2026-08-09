@@ -32,29 +32,63 @@ db = get_db()
 # 3. SISTEMA DI LOGIN
 # -----------------------------------------------------------------------------
 def check_password():
-    def password_entered():
-        user = st.session_state.get("username", "").strip()
-        pwd = st.session_state.get("password", "").strip()
-        passwords = st.secrets.get("passwords", {})
-        
-        if user in passwords and str(passwords[user]) == pwd:
-            st.session_state["password_correct"] = True
-            st.session_state["current_user"] = user
-            if "password" in st.session_state:
-                del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
     if st.session_state.get("password_correct", False):
         return True
 
     st.title("🔒 Accesso a Garage Manager Pro 📱")
-    st.text_input("Username", key="username")
-    st.text_input("Password", type="password", key="password")
-    st.button("Accedi", on_click=password_entered)
+    
+    # Tab per separare Login e Registrazione
+    tab_login, tab_register = st.tabs(["🔑 Accedi", "📝 Registrati"])
 
-    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("❌ Username o password errati")
+    # --- TAB LOGIN ---
+    with tab_login:
+        user_input = st.text_input("Username", key="login_user").strip()
+        pwd_input = st.text_input("Password", type="password", key="login_pwd").strip()
+        
+        if st.button("Accedi", use_container_width=True):
+            # 1. Controlla prima nei secrets (utenti admin hardcoded)
+            secrets_passwords = st.secrets.get("passwords", {})
+            
+            # 2. Controlla nel database Firestore
+            user_doc = db.collection("utenti").document(user_input).get()
+            
+            is_valid = False
+            if user_input in secrets_passwords and str(secrets_passwords[user_input]) == pwd_input:
+                is_valid = True
+            elif user_doc.exists and user_doc.to_dict().get("password") == pwd_input:
+                is_valid = True
+
+            if is_valid:
+                st.session_state["password_correct"] = True
+                st.session_state["current_user"] = user_input
+                st.rerun()
+            else:
+                st.error("❌ Username o password errati")
+
+    # --- TAB REGISTRAZIONE ---
+    with tab_register:
+        new_user = st.text_input("Scegli un Username", key="reg_user").strip()
+        new_pwd = st.text_input("Scegli una Password", type="password", key="reg_pwd").strip()
+        confirm_pwd = st.text_input("Conferma Password", type="password", key="reg_pwd_confirm").strip()
+        
+        if st.button("Crea Account", type="primary", use_container_width=True):
+            if not new_user or not new_pwd:
+                st.warning("Compila tutti i campi!")
+            elif new_pwd != confirm_pwd:
+                st.error("❌ Le password non coincidono")
+            else:
+                # Verifica se l'utente esiste già su Firestore
+                user_ref = db.collection("utenti").document(new_user)
+                if user_ref.get().exists or new_user in st.secrets.get("passwords", {}):
+                    st.error("❌ Questo username è già esistente. Scegli un altro nome.")
+                else:
+                    # Salva il nuovo utente su Firestore
+                    user_ref.set({
+                        "password": new_pwd,
+                        "data_creazione": datetime.date.today().strftime("%d/%m/%Y")
+                    })
+                    st.success("✅ Account creato con successo! Ora puoi effettuare l'accesso dal tab 'Accedi'.")
+
     return False
 
 if not check_password():
