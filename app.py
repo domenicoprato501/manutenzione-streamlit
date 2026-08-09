@@ -1,5 +1,7 @@
-import hashlib
+import io
 import json
+import hashlib
+import pandas as pd
 import streamlit as st
 from google.cloud import firestore
 from google.oauth2 import service_account
@@ -117,7 +119,7 @@ st.sidebar.divider()
 menu = st.sidebar.radio("Menu", ["📋 Registro Veicoli", "➕ Nuovo Intervento", "🔍 Ricerca Targa"])
 
 # -----------------------------------------------------------------------------
-# 5. SCHERMATA: REGISTRO VEICOLI
+# 5. SCHERMATA: REGISTRO VEICOLI & ESPORTAZIONE DATI
 # -----------------------------------------------------------------------------
 if menu == "📋 Registro Veicoli":
     st.title("📋 Registro Veicoli & Interventi")
@@ -128,6 +130,71 @@ if menu == "📋 Registro Veicoli":
     if not veicoli_list:
         st.info("Nessun veicolo presente nel database. Aggiungi il primo intervento dal menu a sinistra.")
     else:
+        # --- PREPARAZIONE DATI PER ESPORTAZIONE ---
+        rows = []
+        for v in veicoli_list:
+            interventi = v.get("interventi", [])
+            if interventi:
+                for i in interventi:
+                    rows.append({
+                        "Targa": v.get("targa", ""),
+                        "Marca": v.get("marca", ""),
+                        "Modello": v.get("modello", ""),
+                        "Cliente": v.get("cliente", ""),
+                        "Telefono": v.get("telefono", ""),
+                        "Km Attuali": v.get("km", 0),
+                        "Data Intervento": i.get("data", ""),
+                        "Descrizione Lavori": i.get("descrizione", ""),
+                        "Costo (€)": i.get("costo", 0.0),
+                        "Operatore": i.get("operatore", "")
+                    })
+            else:
+                rows.append({
+                    "Targa": v.get("targa", ""),
+                    "Marca": v.get("marca", ""),
+                    "Modello": v.get("modello", ""),
+                    "Cliente": v.get("cliente", ""),
+                    "Telefono": v.get("telefono", ""),
+                    "Km Attuali": v.get("km", 0),
+                    "Data Intervento": "Nessun intervento",
+                    "Descrizione Lavori": "-",
+                    "Costo (€)": 0.0,
+                    "Operatore": "-"
+                })
+
+        df = pd.DataFrame(rows)
+
+        # --- SEZIONE PULSANTI DOWNLOAD ---
+        st.subheader("📥 Esporta Registro")
+        col_dl1, col_dl2, _ = st.columns([1, 1, 2])
+
+        # 1. Download CSV
+        csv_data = df.to_csv(index=False).encode('utf-8')
+        col_dl1.download_button(
+            label="📄 Scarica in CSV",
+            data=csv_data,
+            file_name="registro_veicoli.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+        # 2. Download Excel (.xlsx)
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name="Registro Veicoli")
+        
+        col_dl2.download_button(
+            label="📊 Scarica in Excel",
+            data=buffer.getvalue(),
+            file_name="registro_veicoli.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+        st.divider()
+
+        # --- VISUALIZZAZIONE SCHEDE VEICOLI ---
+        st.subheader("🚘 Schede Veicoli")
         for v in veicoli_list:
             with st.expander(f"🚘 {v.get('targa', 'N/A')} - {v.get('marca', '')} {v.get('modello', '')} ({v.get('cliente', 'Cliente sconosciuto')})"):
                 col1, col2, col3 = st.columns(3)
