@@ -28,7 +28,7 @@ def get_db():
 db = get_db()
 
 # -----------------------------------------------------------------------------
-# 3. SISTEMA DI LOGIN NATIVO
+# 3. SISTEMA DI LOGIN
 # -----------------------------------------------------------------------------
 def check_password():
     def password_entered():
@@ -72,7 +72,7 @@ st.sidebar.divider()
 menu = st.sidebar.radio("Menu", ["📋 Registro Veicoli", "➕ Nuovo Intervento", "🔍 Ricerca Targa"])
 
 # -----------------------------------------------------------------------------
-# 5. SCHERMATA: REGISTRO VEICOLI
+# 5. SCHERMATA: REGISTRO VEICOLI (LAYOUT ORIGINALE)
 # -----------------------------------------------------------------------------
 if menu == "📋 Registro Veicoli":
     st.title("📋 Registro Veicoli & Interventi")
