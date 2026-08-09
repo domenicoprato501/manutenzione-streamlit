@@ -2,3 +2,4 @@ streamlit
 google-cloud-firestore
 pandas
 openpyxl
+firebase-admin
