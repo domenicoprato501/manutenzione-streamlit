@@ -61,7 +61,7 @@ if not check_password():
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 4. STRUTTURA DATI (GARAGE)
+# 4. STRUTTURA DATI & FUNZIONI DI SUPPORTO
 # -----------------------------------------------------------------------------
 def get_default_vehicle_data():
     return {
@@ -91,13 +91,16 @@ def get_default_vehicle_data():
     }
 
 def giorni_a_scadenza(data_str):
-    if data_str == "Non inserita" or not data_str:
+    if data_str in ["Non inserita", "Mai fatta", ""] or not data_str:
         return None
     try:
         dt = datetime.datetime.strptime(data_str, "%d/%m/%Y").date()
         return (dt - datetime.date.today()).days
     except:
         return None
+
+def format_km(km_val):
+    return f"{km_val:,}".replace(",", ".")
 
 # -----------------------------------------------------------------------------
 # 5. SIDEBAR: LISTA VEICOLI
@@ -173,12 +176,12 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
     st.divider()
 
     # === 2. SEZIONE MECCANICA ===
-    st.subheader(f"=== MECCANICA (Odom: {km:,} Km) ===".replace(",", "."))
+    st.subheader(f"=== MECCANICA (Odom: {format_km(km)} Km) ===")
     
     # Olio Motore
     km_olio = km - v.get('ultimo_cambio_olio', 0)
     spec_olio = v.get("tipo_olio_corrente", "Non specificato")
-    msg_olio = f"• Olio Motore ({spec_olio}): Usati {km_olio}/15.000 Km"
+    msg_olio = f"• Olio Motore ({spec_olio}): Usati {format_km(km_olio)}/15.000 Km"
     if km_olio >= 15000:
         st.error(msg_olio)
     else:
@@ -193,7 +196,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
     ]
     for n, c in filtri:
         km_f = km - v.get(c, 0)
-        msg_f = f"• {n}: Usati {km_f}/20.000 Km"
+        msg_f = f"• {n}: Usati {format_km(km_f)}/20.000 Km"
         if km_f >= 20000:
             st.error(msg_f)
         else:
@@ -202,16 +205,16 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
     # Pastiglie & Dischi
     p_ant = km - v.get('pastiglie_anteriori', 0)
     p_post = km - v.get('pastiglie_posteriori', 0)
-    st.success(f"• Pastiglie ANT: {p_ant}/40.000 Km | POST: {p_post}/60.000 Km")
+    st.success(f"• Pastiglie ANT: {format_km(p_ant)}/40.000 Km | POST: {format_km(p_post)}/60.000 Km")
 
     d_ant = km - v.get('dischi_anteriori', 0)
     d_post = km - v.get('dischi_posteriore', 0)
-    st.success(f"• Dischi ANT: {d_ant}/80.000 Km | POST: {d_post}/100.000 Km")
+    st.success(f"• Dischi ANT: {format_km(d_ant)}/80.000 Km | POST: {format_km(d_post)}/100.000 Km")
 
     # Inversione & Cambio Gomme
     km_inv = km - v.get('km_ultima_inversione', 0)
     data_inv = v.get('data_ultima_inversione', 'Mai fatta')
-    st.success(f"• Inversione Gomme: Fatti {km_inv}/10.000 Km | Data: {data_inv}")
+    st.success(f"• Inversione Gomme: Fatti {format_km(km_inv)}/10.000 Km | Data: {data_inv}")
 
     ultimo_cambio_g = v.get('data_cambio_gomme', 'Non inserita')
     st.success(f"• Ultimo Cambio Gomme: {ultimo_cambio_g}")
@@ -242,6 +245,31 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
             v_ref.set(v)
             st.rerun()
 
+    # Riga Nuova: Intervento Straordinario / Generico Libero
+    with st.popover("🛠️ INTERVENTO GENERICO / STRAORDINARIO", use_container_width=True):
+        titolo_straord = st.text_input("Titolo Intervento (es. Cinghia Distribuzione, Batteria)")
+        costo_straord = st.number_input("Costo (€)", min_value=0.0, value=0.0, step=10.0)
+        data_straord = st.date_input("Data Intervento", value=datetime.date.today())
+        note_straord = st.text_area("Note / Officina / Dettagli Ricambi")
+        if st.button("SALVA INTERVENTO STRAORDINARIO", type="primary", use_container_width=True):
+            if titolo_straord.strip():
+                data_str = data_straord.strftime("%d/%m/%Y")
+                desc = f"{titolo_straord.strip()}"
+                if note_straord.strip():
+                    desc += f" [Note: {note_straord.strip()}]"
+                
+                v.setdefault("storico_interventi", []).append({
+                    "data": data_str,
+                    "lavoro": desc,
+                    "km": v["km_attuali"],
+                    "costo": costo_straord
+                })
+                v_ref.set(v)
+                st.success("Intervento registrato con successo!")
+                st.rerun()
+            else:
+                st.warning("Inserisci almeno il titolo dell'intervento!")
+
     # Riga 2: Inversione e Cambio Gomme
     c1, c2 = st.columns(2)
     with c1:
@@ -253,7 +281,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                 v["km_ultima_inversione"] = v["km_attuali"]
                 v["data_ultima_inversione"] = oggi_str
                 desc = f"Inversione Gomme [Note: {note_inv.strip() or 'N/D'}]"
-                v["storico_interventi"].append({"data": oggi_str, "lavoro": desc, "km": v["km_attuali"], "costo": c_inv})
+                v.setdefault("storico_interventi", []).append({"data": oggi_str, "lavoro": desc, "km": v["km_attuali"], "costo": c_inv})
                 v_ref.set(v)
                 st.rerun()
 
@@ -268,7 +296,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                 v["km_ultima_inversione"] = v["km_attuali"]
                 v["data_ultima_inversione"] = oggi_str
                 desc = f"Sostituzione Pneumatici Nuovi [{m_cg.strip() or 'Generica'} - {cod_cg.strip() or 'N/D'}]"
-                v["storico_interventi"].append({"data": oggi_str, "lavoro": desc, "km": v["km_attuali"], "costo": c_cg})
+                v.setdefault("storico_interventi", []).append({"data": oggi_str, "lavoro": desc, "km": v["km_attuali"], "costo": c_cg})
                 v_ref.set(v)
                 st.rerun()
 
@@ -301,7 +329,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                     v[campo] = v["km_attuali"]
                     oggi_str = datetime.date.today().strftime("%d/%m/%Y")
                     desc = f"{nome.replace('🛑 ', '')} [{marca.strip() or 'Generica'} - Cod:{codice.strip() or 'N/D'}]"
-                    v["storico_interventi"].append({"data": oggi_str, "lavoro": desc, "km": v["km_attuali"], "costo": costo})
+                    v.setdefault("storico_interventi", []).append({"data": oggi_str, "lavoro": desc, "km": v["km_attuali"], "costo": costo})
                     v_ref.set(v)
                     st.rerun()
 
@@ -317,7 +345,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                     v[campo] = v["km_attuali"]
                     oggi_str = datetime.date.today().strftime("%d/%m/%Y")
                     desc = f"{nome.replace('💿 ', '')} [{marca.strip() or 'Generica'} - Cod:{codice.strip() or 'N/D'}]"
-                    v["storico_interventi"].append({"data": oggi_str, "lavoro": desc, "km": v["km_attuali"], "costo": costo})
+                    v.setdefault("storico_interventi", []).append({"data": oggi_str, "lavoro": desc, "km": v["km_attuali"], "costo": costo})
                     v_ref.set(v)
                     st.rerun()
 
@@ -389,7 +417,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                     filtri_cambiati.append(f"{nome_p} ({m_str} - Cod:{c_str}) [{prezzo}€]")
 
                 desc_completa = "Tagliando Completo: " + ", ".join(filtri_cambiati)
-                v["storico_interventi"].append({
+                v.setdefault("storico_interventi", []).append({
                     "data": oggi_str,
                     "lavoro": desc_completa,
                     "km": v["km_attuali"],
@@ -448,19 +476,21 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
             try:
                 anno = data_int.split("/")[-1]
             except:
-                anno = "Insubordinato"
+                anno = "Altro"
             
             interventi_per_anno.setdefault(anno, []).append(intervento)
 
         for anno in sorted(interventi_per_anno.keys(), reverse=True):
-            st.markdown(f"#### 📅 --- ANNO {anno} ---")
+            totale_anno = sum(item.get("costo", 0.0) for item in interventi_per_anno[anno])
+            st.markdown(f"#### 📅 --- ANNO {anno} (Totale: {totale_anno:.2f}€) ---")
+            
             for intervento in reversed(interventi_per_anno[anno]):
                 data_int = intervento.get("data", "Sconosciuta")
                 lavoro_int = intervento.get("lavoro", "Intervento")
                 km_int = intervento.get("km", 0)
                 costo_int = intervento.get("costo", 0.0)
                 
-                st.info(f"🔧 **{lavoro_int}**\n\nData: {data_int} | Km: {km_int:,} | Spesa: {costo_int:.2f}€".replace(",", "."))
+                st.info(f"🔧 **{lavoro_int}**\n\nData: {data_int} | Km: {format_km(km_int)} | Spesa: {costo_int:.2f}€")
 
 else:
     st.info("👈 Seleziona un veicolo dal menu a sinistra per accedere alla scheda.")
