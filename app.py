@@ -292,7 +292,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
 
     # Riga 5: Dischi
     c7, c8 = st.columns(2)
-    for col, nome, campo in [(c7, "💿 DISCHI ANT", "dischi_anteriori"), (c8, "💿 DISCHI POST", "dischi_posteriore")]:
+    for col, nome, campo in [(c7, "CD DISCHI ANT", "dischi_anteriori"), (c8, "💿 DISCHI POST", "dischi_posteriore")]:
         with col:
             with st.popover(nome, use_container_width=True):
                 costo = st.number_input(f"Costo (€) - {nome}", min_value=0.0, value=0.0)
@@ -319,41 +319,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
 
     st.divider()
 
-    # === 4. SEZIONE NOTE GIORNALIERE E STORICO DIARIO ===
-    st.subheader("=== NOTE E PROMEMORIA DIARIO ===")
-    oggi_str = datetime.date.today().strftime("%d/%m/%Y")
-    note_storiche = v.get("note_storiche", {})
-    nota_oggi_corrente = note_storiche.get(oggi_str, "")
-
-    with st.popover(f"📝 SCRIVI NOTA DI OGGI ({oggi_str})", use_container_width=True):
-        t_nota = st.text_area("Scrivi la nota di oggi...", value=nota_oggi_corrente)
-        if st.button("SALVA NOTA", use_container_width=True):
-            if t_nota.strip():
-                v.setdefault("note_storiche", {})[oggi_str] = t_nota.strip()
-            else:
-                if "note_storiche" in v and oggi_str in v["note_storiche"]:
-                    del v["note_storiche"][oggi_str]
-            v_ref.set(v)
-            st.rerun()
-
-    if not note_storiche:
-        st.caption("Nessuna nota nel diario.")
-    else:
-        st.markdown("**📌 Diario Note Passate:**")
-        for data_nota in sorted(note_storiche.keys(), reverse=True):
-            with st.expander(f"📌 Nota del {data_nota}: {note_storiche[data_nota][:30]}..."):
-                t_modifica = st.text_area("Modifica nota:", value=note_storiche[data_nota], key=f"note_{data_nota}")
-                if st.button("CORREGGI NOTA", key=f"btn_note_{data_nota}"):
-                    if t_modifica.strip():
-                        v["note_storiche"][data_nota] = t_modifica.strip()
-                    else:
-                        del v["note_storiche"][data_nota]
-                    v_ref.set(v)
-                    st.rerun()
-
-    st.divider()
-
-    # === 5. BOTTONE TAGLIANDO COMPLETO ===
+    # === 4. SEZIONE MANUTENZIONE COMPLETA ===
     st.subheader("=== MANUTENZIONE COMPLETA ===")
     with st.expander("🛠️ COMPONI TAGLIANDO COMPLETO (OLIO E FILTRI) ➕"):
         filtri_config = [
@@ -411,6 +377,40 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                 v_ref.set(v)
                 st.success("Tagliando salvato!")
                 st.rerun()
+
+    st.divider()
+
+    # === 5. SEZIONE NOTE GIORNALIERE E STORICO DIARIO ===
+    st.subheader("=== NOTE E PROMEMORIA DIARIO ===")
+    oggi_str = datetime.date.today().strftime("%d/%m/%Y")
+    note_storiche = v.get("note_storiche", {})
+    nota_oggi_corrente = note_storiche.get(oggi_str, "")
+
+    with st.popover(f"📝 SCRIVI NOTA DI OGGI ({oggi_str})", use_container_width=True):
+        t_nota = st.text_area("Scrivi la nota di oggi...", value=nota_oggi_corrente)
+        if st.button("SALVA NOTA", use_container_width=True):
+            if t_nota.strip():
+                v.setdefault("note_storiche", {})[oggi_str] = t_nota.strip()
+            else:
+                if "note_storiche" in v and oggi_str in v["note_storiche"]:
+                    del v["note_storiche"][oggi_str]
+            v_ref.set(v)
+            st.rerun()
+
+    if not note_storiche:
+        st.caption("Nessuna nota nel diario.")
+    else:
+        st.markdown("**📌 Diario Note Passate:**")
+        for data_nota in sorted(note_storiche.keys(), reverse=True):
+            with st.expander(f"📌 Nota del {data_nota}: {note_storiche[data_nota][:30]}..."):
+                t_modifica = st.text_area("Modifica nota:", value=note_storiche[data_nota], key=f"note_{data_nota}")
+                if st.button("CORREGGI NOTA", key=f"btn_note_{data_nota}"):
+                    if t_modifica.strip():
+                        v["note_storiche"][data_nota] = t_modifica.strip()
+                    else:
+                        del v["note_storiche"][data_nota]
+                    v_ref.set(v)
+                    st.rerun()
 
     st.divider()
 
