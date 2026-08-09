@@ -61,10 +61,11 @@ if not check_password():
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 4. STRUTTURA DATI ORIGINALE (GARAGE)
+# 4. STRUTTURA DATI (GARAGE)
 # -----------------------------------------------------------------------------
 def get_default_vehicle_data():
     return {
+        "modello": "Non specificato",
         "km_attuali": 0,
         "ultimo_cambio_olio": 0,
         "tipo_olio_corrente": "Non specificato",
@@ -82,6 +83,7 @@ def get_default_vehicle_data():
         "scadenza_revisione": "Non inserita",
         "scadenza_bollo": "Non inserita",
         "scadenza_assicurazione": "Non inserita",
+        "scadenza_bombole": "Non inserita",
         "scadenza_tergicristalli_ant": "Non inserita",
         "scadenza_tergicristalli_post": "Non inserita",
         "note_storiche": {},
@@ -116,13 +118,16 @@ st.sidebar.subheader("🚗 Lista Veicoli")
 targa_selezionata = st.sidebar.selectbox("Seleziona un mezzo", options=["-- Seleziona --"] + targhe_list)
 
 with st.sidebar.expander("➕ / 🗑️ Gestisci Mezzi"):
-    nuova_targa = st.text_input("Targa o Nome Mezzo").upper().strip()
+    nuova_targa = st.text_input("Targa Mezzo").upper().strip()
+    nuovo_modello = st.text_input("Modello (es. Fiat Punto)").strip()
     if st.button("➕ AGGIUNGI MEZZO", use_container_width=True):
         if nuova_targa:
             if nuova_targa in veicoli_dict:
                 st.warning("Esiste già!")
             else:
-                db.collection("veicoli").document(nuova_targa).set(get_default_vehicle_data())
+                dati_v = get_default_vehicle_data()
+                dati_v["modello"] = nuovo_modello if nuovo_modello else "Non specificato"
+                db.collection("veicoli").document(nuova_targa).set(dati_v)
                 st.success(f"Veicolo {nuova_targa} aggiunto!")
                 st.rerun()
 
@@ -135,18 +140,26 @@ with st.sidebar.expander("➕ / 🗑️ Gestisci Mezzi"):
             st.rerun()
 
 # -----------------------------------------------------------------------------
-# 6. SCHERMATA DETTAGLIO VEICOLO (FEDELE A KIVY)
+# 6. SCHERMATA DETTAGLIO VEICOLO
 # -----------------------------------------------------------------------------
 if targa_selezionata and targa_selezionata != "-- Seleziona --":
     v_ref = db.collection("veicoli").document(targa_selezionata)
     v = v_ref.get().to_dict() or get_default_vehicle_data()
     km = v.get("km_attuali", 0)
+    modello_v = v.get("modello", "Non specificato")
 
     st.header(f"📱 Scheda: {targa_selezionata}")
+    st.caption(f"🚘 **Modello:** {modello_v}")
 
     # === 1. SEZIONE DOCUMENTI ===
     st.subheader("=== SCADENZE DOCUMENTI ===")
-    for tipo, campo in [("Revisione", "scadenza_revisione"), ("Bollo", "scadenza_bollo"), ("Assicurazione", "scadenza_assicurazione")]:
+    documenti = [
+        ("Revisione", "scadenza_revisione"),
+        ("Bollo", "scadenza_bollo"),
+        ("Assicurazione", "scadenza_assicurazione"),
+        ("Revisione Bombole", "scadenza_bombole")
+    ]
+    for tipo, campo in documenti:
         scad = v.get(campo, "Non inserita")
         giorni = giorni_a_scadenza(scad)
         
@@ -219,11 +232,13 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
     # === 3. SEZIONE INTERVENTI RAPIDI ===
     st.subheader("=== INTERVENTI RAPIDI ===")
 
-    # Riga 1: Aggiorna KM
-    with st.popover("📊 AGGIORNA KM MEZZO", use_container_width=True):
+    # Riga 1: Aggiorna KM e Modello
+    with st.popover("📊 AGGIORNA KM / MODELLO", use_container_width=True):
         n_km = st.number_input("Chilometri attuali", value=km, step=100)
-        if st.button("SALVA KM", use_container_width=True):
+        n_mod = st.text_input("Modello Veicolo", value=modello_v)
+        if st.button("SALVA DATI", use_container_width=True):
             v["km_attuali"] = int(n_km)
+            v["modello"] = n_mod.strip() or "Non specificato"
             v_ref.set(v)
             st.rerun()
 
@@ -292,7 +307,7 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
 
     # Riga 5: Dischi
     c7, c8 = st.columns(2)
-    for col, nome, campo in [(c7, "CD DISCHI ANT", "dischi_anteriori"), (c8, "💿 DISCHI POST", "dischi_posteriore")]:
+    for col, nome, campo in [(c7, "💿 DISCHI ANT", "dischi_anteriori"), (c8, "💿 DISCHI POST", "dischi_posteriore")]:
         with col:
             with st.popover(nome, use_container_width=True):
                 costo = st.number_input(f"Costo (€) - {nome}", min_value=0.0, value=0.0)
@@ -306,9 +321,15 @@ if targa_selezionata and targa_selezionata != "-- Seleziona --":
                     v_ref.set(v)
                     st.rerun()
 
-    # Riga 6: Documenti (Rev, Bollo, Assic)
-    c9, c10, c11 = st.columns(3)
-    for col, nome, campo in [(c9, "📅 REV", "scadenza_revisione"), (c10, "📅 BOLLO", "scadenza_bollo"), (c11, "🛡️ ASSIC", "scadenza_assicurazione")]:
+    # Riga 6: Documenti (Rev, Bollo, Assic, Bombole)
+    c9, c10, c11, c12 = st.columns(4)
+    doc_buttons = [
+        (c9, "📅 REV", "scadenza_revisione"),
+        (c10, "📅 BOLLO", "scadenza_bollo"),
+        (c11, "🛡️ ASSIC", "scadenza_assicurazione"),
+        (c12, "🔥 BOMBOLE", "scadenza_bombole")
+    ]
+    for col, nome, campo in doc_buttons:
         with col:
             with st.popover(nome, use_container_width=True):
                 d_scad = st.date_input(f"Scadenza {nome}")
