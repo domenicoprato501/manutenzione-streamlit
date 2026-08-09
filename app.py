@@ -1,576 +1,196 @@
-import datetime
 import json
 import streamlit as st
 from google.cloud import firestore
 from google.oauth2 import service_account
 
+# -----------------------------------------------------------------------------
 # 1. CONFIGURAZIONE PAGINA
+# -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Garage Manager Pro 📱",
+    page_title="Garage Manager Pro",
     page_icon="🚗",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="wide"
 )
 
-# 2. CSS MOBILE-FRIENDLY
-st.markdown(
-    """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    .block-container {
-        padding-top: 2rem !important;
-        padding-bottom: 1rem !important;
-    }
-    </style>
-""",
-    unsafe_allow_html=True,
-)
-
-# 3. CONNESSIONE A GOOGLE CLOUD FIRESTORE
+# -----------------------------------------------------------------------------
+# 2. CONNESSIONE A FIRESTORE
+# -----------------------------------------------------------------------------
 @st.cache_resource
 def get_db():
-  try:
-    key_dict = json.loads(st.secrets["firestore"]["text_key"])
-    creds = service_account.Credentials.from_service_account_info(key_dict)
-    return firestore.Client(credentials=creds)
-  except Exception as e:
-    st.error(
-        "❌ Errore di connessione a Firestore. Controlla di aver inserito i"
-        " Segreti su Streamlit!"
-    )
-    st.stop()
-
+    try:
+        key_dict = json.loads(st.secrets["firestore"]["text_key"])
+        creds = service_account.Credentials.from_service_account_info(key_dict)
+        return firestore.Client(credentials=creds)
+    except Exception as e:
+        st.error(f"❌ Errore di connessione al database: {e}")
+        st.stop()
 
 db = get_db()
 
+# -----------------------------------------------------------------------------
+# 3. SISTEMA DI AUTENTICAZIONE
+# -----------------------------------------------------------------------------
+def check_password():
+    def password_entered():
+        user = st.session_state.get("username", "").strip()
+        pwd = st.session_state.get("password", "").strip()
+        
+        passwords = st.secrets.get("passwords", {})
+        if user in passwords and str(passwords[user]) == pwd:
+            st.session_state["password_correct"] = True
+            st.session_state["current_user"] = user
+            if "password" in st.session_state:
+                del st.session_state["password"]
+        else:
+            st.session_state["password_correct"] = False
 
-class GarageCloud:
+    if st.session_state.get("password_correct", False):
+        return True
 
-  @staticmethod
-  def carica():
-    """Scarica tutti i veicoli dal Cloud Firestore."""
-    docs = db.collection("veicoli").stream()
-    dati = {}
-    for doc in docs:
-      dati[doc.id] = doc.to_dict()
-    return dati
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.title("🔒 Garage Manager Pro")
+        st.subheader("Accedi al gestionale")
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", key="password")
+        st.button("Accedi", on_click=password_entered, type="primary", use_container_width=True)
 
-  @staticmethod
-  def salva_veicolo(targa, dati_veicolo):
-    """Salva/Aggiorna un singolo veicolo nel Cloud."""
-    db.collection("veicoli").document(targa).set(dati_veicolo)
+        if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+            st.error("❌ Username o password non validi")
 
-  @staticmethod
-  def elimina_veicolo(targa):
-    """Elimina un veicolo dal Cloud."""
-    db.collection("veicoli").document(targa).delete()
+    return False
 
-  @staticmethod
-  def giorni_a_scadenza(data_str):
-    if data_str == "Non inserita" or not data_str:
-      return None
-    try:
-      dt = datetime.datetime.strptime(data_str, "%d/%m/%Y").date()
-      return (dt - datetime.date.today()).days
-    except:
-      return None
+if not check_password():
+    st.stop()
 
-  @staticmethod
-  def assicura_struttura_veicolo(v):
-    campi_default = {
-        "nome_modello": "NON SPECIFICATO",
-        "km_attuali": 0,
-        "ultimo_cambio_olio": 0,
-        "tipo_olio_corrente": "Non specificato",
-        "ultimo_filtro_olio": 0,
-        "ultimo_filtro_aria": 0,
-        "ultimo_filtro_abitacolo": 0,
-        "ultimo_filtro_carburante": 0,
-        "pastiglie_anteriori": 0,
-        "pastiglie_posteriori": 0,
-        "dischi_anteriori": 0,
-        "dischi_posteriore": 0,
-        "km_ultima_inversione": 0,
-        "data_ultima_inversione": "Mai fatta",
-        "data_cambio_gomme": "Non inserita",
-        "scadenza_revisione": "Non inserita",
-        "scadenza_bollo": "Non inserita",
-        "scadenza_assicurazione": "Non inserita",
-        "scadenza_tergicristalli_ant": "Non inserita",
-        "scadenza_tergicristalli_post": "Non inserita",
-        "note_storiche": {},
-        "storico_interventi": [],
-    }
-    for chiave, valore in campi_default.items():
-      if chiave not in v:
-        v[chiave] = valore
-    return v
+# -----------------------------------------------------------------------------
+# 4. SIDEBAR & NAVIGAZIONE
+# -----------------------------------------------------------------------------
+st.sidebar.title("🛠️ Garage Manager")
+st.sidebar.write(f"Utente connesso: **{st.session_state.get('current_user', 'User')}**")
 
-
-# Carica i dati dal Cloud
-dati = GarageCloud.carica()
-
-for k in list(dati.keys()):
-  GarageCloud.assicura_struttura_veicolo(dati[k])
-
-# --- BARRA LATERALE ---
-st.sidebar.title("Garage Manager Pro 📱")
-
-
-def formatta_opzione(targa):
-  if targa == "-- Seleziona --":
-    return targa
-  modello = dati.get(targa, {}).get("nome_modello", "").upper()
-  if modello and modello != "NON SPECIFICATO":
-    return f"{targa} ({modello})"
-  return targa
-
-
-targhe = list(dati.keys())
-targa_selezionata = st.sidebar.selectbox(
-    "🏎️ Seleziona Veicolo",
-    options=["-- Seleziona --"] + targhe,
-    format_func=formatta_opzione,
-)
-
-st.sidebar.divider()
-
-# Aggiungi Veicolo
-with st.sidebar.expander("➕ AGGIUNGI MEZZO"):
-  nuova_targa = st.text_input("Targa (es. AB123CD)").strip().upper()
-  nuovo_modello = st.text_input("Modello / Nome (es. Fiat Panda)").strip().upper()
-
-  if st.button("Salva Nuovo Veicolo"):
-    if nuova_targa in dati:
-      st.error("Targa già esistente!")
-    elif nuova_targa:
-      nuovo_v = {
-          "nome_modello": (
-              nuovo_modello if nuovo_modello else "NON SPECIFICATO"
-          ),
-          "km_attuali": 0,
-          "ultimo_cambio_olio": 0,
-          "tipo_olio_corrente": "Non specificato",
-          "ultimo_filtro_olio": 0,
-          "ultimo_filtro_aria": 0,
-          "ultimo_filtro_abitacolo": 0,
-          "ultimo_filtro_carburante": 0,
-          "pastiglie_anteriori": 0,
-          "pastiglie_posteriori": 0,
-          "dischi_anteriori": 0,
-          "dischi_posteriore": 0,
-          "km_ultima_inversione": 0,
-          "data_ultima_inversione": "Mai fatta",
-          "data_cambio_gomme": "Non inserita",
-          "scadenza_revisione": "Non inserita",
-          "scadenza_bollo": "Non inserita",
-          "scadenza_assicurazione": "Non inserita",
-          "scadenza_tergicristalli_ant": "Non inserita",
-          "scadenza_tergicristalli_post": "Non inserita",
-          "note_storiche": {},
-          "storico_interventi": [],
-      }
-      GarageCloud.salva_veicolo(nuova_targa, nuovo_v)
-      st.success("Veicolo aggiunto al Cloud!")
-      st.rerun()
-    else:
-      st.error("Inserisci la Targa!")
-
-# Rimuovi Veicolo
-with st.sidebar.expander("🗑️ RIMUOVI MEZZO"):
-  if dati:
-    targa_del = st.selectbox(
-        "Seleziona targa da eliminare",
-        options=["-- Seleziona --"] + list(dati.keys()),
-        key="del_sel_box",
-    )
-    if st.button("Conferma Elimina", type="primary"):
-      if targa_del != "-- Seleziona --" and targa_del in dati:
-        GarageCloud.elimina_veicolo(targa_del)
-        st.success(f"Veicolo {targa_del} rimosso dal Cloud!")
-        st.rerun()
-      else:
-        st.warning("Seleziona una targa valida.")
-  else:
-    st.info("Nessun veicolo presente.")
-
-st.sidebar.divider()
-
-# --- SEZIONE AIUTO & ASSISTENZA ---
-with st.sidebar.expander("❓ AIUTO & ASSISTENZA"):
-  st.markdown(
-      """
-    **Hai bisogno di aiuto?**
-    
-    Tutti i tuoi dati vengono ora salvati **automaticamente in Cloud**.
-    
-    * 📧 **Email:** supporto@tuodominio.it
-    * 💬 **WhatsApp:** +39 333 1234567
-    """
-  )
-
-# --- DETTAGLIO VEICOLO ---
-if targa_selezionata and targa_selezionata != "-- Seleziona --":
-  v = GarageCloud.assicura_struttura_veicolo(dati[targa_selezionata])
-  km = v.get("km_attuali", 0)
-
-  modello_str = (
-      f" - {v['nome_modello'].upper()}"
-      if v["nome_modello"].upper() != "NON SPECIFICATO"
-      else ""
-  )
-  st.header(f"🚗 Scheda Veicolo: {targa_selezionata.upper()}{modello_str}")
-
-  with st.expander("✏️ Modifica Nome Modello"):
-    col_m1, col_m2 = st.columns([3, 1])
-    mod_nome = (
-        col_m1.text_input(
-            "Nome Modello / Descrizione", value=v.get("nome_modello", "").upper()
-        )
-        .strip()
-        .upper()
-    )
-    if col_m2.button("Aggiorna Nome"):
-      v["nome_modello"] = mod_nome
-      GarageCloud.salva_veicolo(targa_selezionata, v)
-      st.success("Nome aggiornato!")
-      st.rerun()
-
-  c_km1, c_km2 = st.columns([3, 1])
-  nuovi_km = c_km1.number_input(
-      "📊 Chilometri Attuali Mezzo", value=km, step=100
-  )
-  if c_km2.button("💾 AGGIORNA KM"):
-    v["km_attuali"] = nuovi_km
-    GarageCloud.salva_veicolo(targa_selezionata, v)
-    st.success("Km aggiornati nel Cloud!")
+if st.sidebar.button("Logout", use_container_width=True):
+    st.session_state["password_correct"] = False
     st.rerun()
 
-  st.divider()
+st.sidebar.divider()
+menu = st.sidebar.radio("Menu", ["📋 Registro Veicoli", "➕ Nuovo Intervento", "🔍 Ricerca Targa"])
 
-  col_doc, col_mec = st.columns(2)
+# -----------------------------------------------------------------------------
+# 5. SCHERMATA: REGISTRO VEICOLI
+# -----------------------------------------------------------------------------
+if menu == "📋 Registro Veicoli":
+    st.title("📋 Registro Veicoli & Interventi")
+    
+    docs = db.collection("veicoli").stream()
+    veicoli_list = [doc.to_dict() for doc in docs]
+    
+    if not veicoli_list:
+        st.info("Nessun veicolo presente nel database. Aggiungi il primo intervento dal menu a sinistra.")
+    else:
+        for v in veicoli_list:
+            with st.expander(f"🚘 {v.get('targa', 'N/A')} - {v.get('marca', '')} {v.get('modello', '')} ({v.get('cliente', 'Cliente sconosciuto')})"):
+                col1, col2, col3 = st.columns(3)
+                col1.write(f"**Cliente:** {v.get('cliente', '-')}")
+                col2.write(f"**Telefono:** {v.get('telefono', '-')}")
+                col3.write(f"**Km Attuali:** {v.get('km', '-')}")
+                
+                st.markdown("##### 🛠️ Cronologia Interventi")
+                interventi = v.get("interventi", [])
+                if interventi:
+                    for i in reversed(interventi):
+                        st.caption(f"📅 **Data:** {i.get('data')} | **Operatore:** {i.get('operatore')}")
+                        st.write(f"**Descrizione:** {i.get('descrizione')}")
+                        st.write(f"**Costo:** {i.get('costo')} €")
+                        st.divider()
+                else:
+                    st.write("Nessun intervento registrato.")
 
-  # 1. SCADENZE DOCUMENTI
-  with col_doc:
-    st.subheader("📋 Scadenze Documenti & Tergi")
-
-    doc_list = [
-        ("Revisione", "scadenza_revisione"),
-        ("Bollo", "scadenza_bollo"),
-        ("Assicurazione", "scadenza_assicurazione"),
-        ("Tergicristalli ANT", "scadenza_tergicristalli_ant"),
-        ("Tergicristalli POST", "scadenza_tergicristalli_post"),
-    ]
-
-    for nome_doc, campo in doc_list:
-      scad = v.get(campo, "Non inserita")
-      giorni = GarageCloud.giorni_a_scadenza(scad)
-
-      c_label, c_date, c_btn = st.columns([2, 2, 1])
-      if giorni is not None and giorni < 0:
-        c_label.error(f"• {nome_doc}: {scad}")
-      else:
-        c_label.write(f"• **{nome_doc}**: {scad}")
-
-      dt_input = c_date.date_input(
-          f"Seleziona {nome_doc}",
-          value=datetime.date.today(),
-          key=f"dt_{campo}",
-          label_visibility="collapsed",
-      )
-      if c_btn.button("Salva", key=f"btn_{campo}"):
-        v[campo] = dt_input.strftime("%d/%m/%Y")
-        GarageCloud.salva_veicolo(targa_selezionata, v)
-        st.success(f"{nome_doc} salvata!")
-        st.rerun()
-
-  # 2. MECCANICA
-  with col_mec:
-    st.subheader(f"⚙️ Meccanica (Odom: {km:,} Km)".replace(",", "."))
-
-    km_olio = km - v.get("ultimo_cambio_olio", 0)
-    spec_olio = v.get("tipo_olio_corrente", "Non specificato").upper()
-    color_o = "🔴" if km_olio >= 15000 else "🟢"
-    st.write(
-        f"{color_o} **Olio Motore** ({spec_olio}): Usati {km_olio}/15.000 Km"
-    )
-
-    filtri = [
-        ("Filtro Olio", "ultimo_filtro_olio"),
-        ("Filtro Aria", "ultimo_filtro_aria"),
-        ("Filtro Abitacolo", "ultimo_filtro_abitacolo"),
-        ("Filtro Carburante", "ultimo_filtro_carburante"),
-    ]
-    for n, c in filtri:
-      km_f = km - v.get(c, 0)
-      color_f = "🔴" if km_f >= 20000 else "🟢"
-      st.write(f"{color_f} **{n}**: Usati {km_f}/20.000 Km")
-
-    p_ant = km - v.get("pastiglie_anteriori", 0)
-    p_post = km - v.get("pastiglie_posteriori", 0)
-    st.write(
-        f"🛑 **Pastiglie**: ANT {p_ant}/40.000 Km | POST {p_post}/60.000 Km"
-    )
-
-    d_ant = km - v.get("dischi_anteriori", 0)
-    d_post = km - v.get("dischi_posteriore", 0)
-    st.write(f"💿 **Dischi**: ANT {d_ant}/80.000 Km | POST {d_post}/100.000 Km")
-
-    km_inv = km - v.get("km_ultima_inversione", 0)
-    data_inv = v.get("data_ultima_inversione", "Mai fatta")
-    st.write(
-        f"🔄 **Inversione Gomme**: Fatti {km_inv}/10.000 Km (Data: {data_inv})"
-    )
-    st.write(
-        f"🛞 **Ultimo Cambio Gomme**: {v.get('data_cambio_gomme', 'Non inserita')}"
-    )
-
-  st.divider()
-
-  # 3. INTERVENTI RAPIDI
-  st.subheader("🛠️ Interventi Rapidi Componenti")
-  col_rap1, col_rap2, col_rap3 = st.columns(3)
-
-  with col_rap1:
-    with st.expander("🔄 Inversione Pneumatici"):
-      costo_inv = st.number_input("Costo (€)", value=0.0, key="c_inv")
-      note_inv = st.text_input("Note Inversione", key="n_inv").strip()
-      if st.button("Registra Inversione"):
-        oggi_str = datetime.date.today().strftime("%d/%m/%Y")
-        v["km_ultima_inversione"] = km
-        v["data_ultima_inversione"] = oggi_str
-        v["storico_interventi"].append({
-            "data": oggi_str,
-            "lavoro": f"INVERSIONE GOMME [NOTE: {note_inv}]",
-            "km": km,
-            "costo": costo_inv,
-        })
-        GarageCloud.salva_veicolo(targa_selezionata, v)
-        st.success("Inversione registrata!")
-        st.rerun()
-
-  with col_rap2:
-    with st.expander("🛞 Cambio Gomme Nuovo"):
-      costo_g = st.number_input("Costo Totale (€)", value=0.0, key="c_g")
-      marca_g = st.text_input("Marca Pneumatici", key="m_g").strip().upper()
-      cod_g = st.text_input("Modello / Misura", key="cd_g").strip()
-      if st.button("Registra Cambio Gomme"):
-        oggi_str = datetime.date.today().strftime("%d/%m/%Y")
-        v["data_cambio_gomme"] = oggi_str
-        v["km_ultima_inversione"] = km
-        v["data_ultima_inversione"] = oggi_str
-        v["storico_interventi"].append({
-            "data": oggi_str,
-            "lavoro": (
-                f"SOSTITUZIONE PNEUMATICI NUOVI [{marca_g} - {cod_g}]"
-            ),
-            "km": km,
-            "costo": costo_g,
-        })
-        GarageCloud.salva_veicolo(targa_selezionata, v)
-        st.success("Cambio gomme salvato!")
-        st.rerun()
-
-  with col_rap3:
-    with st.expander("🛑 Pastiglie / Dischi"):
-      comp_scelta = st.selectbox(
-          "Seleziona Componente",
-          [
-              ("Pastiglie Anteriori", "pastiglie_anteriori"),
-              ("Pastiglie Posteriori", "pastiglie_posteriori"),
-              ("Dischi Anteriori", "dischi_anteriori"),
-              ("Dischi Posteriori", "dischi_posteriore"),
-          ],
-          format_func=lambda x: x[0],
-      )
-      costo_p = st.number_input("Costo (€)", value=0.0, key="c_p")
-      marca_p = st.text_input("Marca Ricambio", key="m_p").strip().upper()
-      cod_p = st.text_input("Codice Ricambio", key="cd_p").strip()
-      if st.button("Registra Componente"):
-        nome_c, chiave_c = comp_scelta
-        v[chiave_c] = km
-        oggi_str = datetime.date.today().strftime("%d/%m/%Y")
-        v["storico_interventi"].append({
-            "data": oggi_str,
-            "lavoro": f"{nome_c.upper()} [{marca_p} - COD:{cod_p}]",
-            "km": km,
-            "costo": costo_p,
-        })
-        GarageCloud.salva_veicolo(targa_selezionata, v)
-        st.success(f"{nome_c} salvato!")
-        st.rerun()
-
-  st.divider()
-
-  # 4. TAGLIANDO COMPLETO
-  with st.expander(
-      "🛠️ COMPONI TAGLIANDO COMPLETO (OLIO E FILTRI)", expanded=False
-  ):
-    filtri_tagliando = [
-        ("🛢️ Olio Motore", "ultimo_cambio_olio"),
-        ("🛢️ Filtro Olio Motore", "ultimo_filtro_olio"),
-        ("💨 Filtro Aria", "ultimo_filtro_aria"),
-        ("🍃 Filtro Abitacolo", "ultimo_filtro_abitacolo"),
-        ("⛽ Filtro Carburante", "ultimo_filtro_carburante"),
-    ]
-
-    dati_tagliando_form = {}
-    for nome_f, chiave_f in filtri_tagliando:
-      c_sw, c_pr, c_mr, c_cd, c_sp = st.columns([2, 1.5, 2, 2, 2])
-      attivo = c_sw.checkbox(nome_f, key=f"sw_{chiave_f}")
-      prezzo = c_pr.number_input(
-          "Prezzo €", value=0.0, key=f"pr_{chiave_f}", disabled=not attivo
-      )
-      marca = (
-          c_mr.text_input(
-              "Marca Ricambio", key=f"mr_{chiave_f}", disabled=not attivo
-          )
-          .strip()
-          .upper()
-      )
-      codice = c_cd.text_input(
-          "Codice Ricambio", key=f"cd_{chiave_f}", disabled=not attivo
-      ).strip()
-
-      spec_o = None
-      if chiave_f == "ultimo_cambio_olio":
-        spec_o = (
-            c_sp.text_input(
-                "Specifica Olio (es. 5W-30)", key="spec_o", disabled=not attivo
-            )
-            .strip()
-            .upper()
-        )
-
-      dati_tagliando_form[chiave_f] = (attivo, prezzo, marca, codice, spec_o)
-
-    if st.button("REGISTRA TAGLIANDO COMPLETO", type="primary"):
-      filtri_cambiati = []
-      costo_totale = 0.0
-      oggi_str = datetime.date.today().strftime("%d/%m/%Y")
-
-      for chiav, (att, prz, mrc, cod, spc) in dati_tagliando_form.items():
-        if att:
-          v[chiav] = km
-          costo_totale += prz
-          mrc_t = mrc or "GENERICA"
-          cod_t = cod or "N/D"
-
-          if chiav == "ultimo_cambio_olio" and spc:
-            spc_t = spc or "NON SPECIFICATO"
-            v["tipo_olio_corrente"] = spc_t
-            nome_pulito = f"CAMBIO OLIO MOTORE ({spc_t})"
-          else:
-            nome_pulito = (
-                chiav.replace("ultimo_", "").replace("_", " ").upper()
-            )
-
-          filtri_cambiati.append(
-              f"{nome_pulito} ({mrc_t} - COD:{cod_t}) [{prz}€]"
-          )
-
-      if filtri_cambiati:
-        descrizione = "TAGLIANDO COMPLETO: " + ", ".join(filtri_cambiati)
-        v["storico_interventi"].append({
-            "data": oggi_str,
-            "lavoro": descrizione,
-            "km": km,
-            "costo": costo_totale,
-        })
-        GarageCloud.salva_veicolo(targa_selezionata, v)
-        st.success("Tagliando completo registrato nel Cloud!")
-        st.rerun()
-
-  st.divider()
-
-  # 5. NOTE
-  st.subheader("📝 Note e Diario di Bordo")
-  oggi_str = datetime.date.today().strftime("%d/%m/%Y")
-  ora_str = datetime.datetime.now().strftime("%H:%M")
-  note_storiche = v.get("note_storiche", {})
-
-  col_n1, col_n2 = st.columns([3, 1])
-  nuova_nota_txt = col_n1.text_area(
-      f"Aggiungi nota per Oggi ({oggi_str})", key="txt_nuova_nota"
-  )
-
-  if col_n2.button("💾 Aggiungi Nota Oggi"):
-    if nuova_nota_txt.strip():
-      testo_formattato = f"[{oggi_str} alle {ora_str}] {nuova_nota_txt.strip()}"
-      if oggi_str in note_storiche and note_storiche[oggi_str].strip():
-        note_storiche[oggi_str] += f"\n\n{testo_formattato}"
-      else:
-        note_storiche[oggi_str] = testo_formattato
-
-      v["note_storiche"] = note_storiche
-      GarageCloud.salva_veicolo(targa_selezionata, v)
-      st.success("Nota salvata nel Cloud!")
-      st.rerun()
-
-  if note_storiche:
-    with st.expander("📌 Modifica o Elimina Note Passate", expanded=True):
-      for d_nota in sorted(note_storiche.keys(), reverse=True):
-        st.markdown(f"### 📅 Data: {d_nota}")
-        col_txt, col_save, col_del = st.columns([3, 1, 1])
-
-        txt_mod = col_txt.text_area(
-            "Testo Nota",
-            value=note_storiche[d_nota],
-            key=f"txt_note_{d_nota}",
-            label_visibility="collapsed",
-        )
-
-        if col_save.button("💾 Aggiorna", key=f"btn_save_note_{d_nota}"):
-          if txt_mod.strip():
-            v["note_storiche"][d_nota] = txt_mod.strip()
-            st.success("Nota aggiornata!")
-          else:
-            del v["note_storiche"][d_nota]
-            st.info("Nota rimossa!")
-          GarageCloud.salva_veicolo(targa_selezionata, v)
-          st.rerun()
-
-        if col_del.button("🗑️ Elimina", key=f"btn_del_note_{d_nota}"):
-          del v["note_storiche"][d_nota]
-          GarageCloud.salva_veicolo(targa_selezionata, v)
-          st.success("Nota eliminata!")
-          st.rerun()
-
+# -----------------------------------------------------------------------------
+# 6. SCHERMATA: NUOVO INTERVENTO / NUOVO VEICOLO
+# -----------------------------------------------------------------------------
+elif menu == "➕ Nuovo Intervento":
+    st.title("➕ Registra Veicolo o Intervento")
+    
+    with st.form("form_intervento", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        targa = col1.text_input("Targa *").upper().strip()
+        cliente = col2.text_input("Nome e Cognome Cliente *")
+        
+        col3, col4, col5 = st.columns(3)
+        marca = col3.text_input("Marca")
+        modello = col4.text_input("Modello")
+        telefono = col5.text_input("Telefono")
+        
         st.divider()
+        st.subheader("Dettagli Lavoro")
+        col6, col7, col8 = st.columns(3)
+        data_intervento = col6.date_input("Data Intervento")
+        km = col7.number_input("Chilometraggio Auto", min_value=0, step=1000)
+        costo = col8.number_input("Costo Totale (€)", min_value=0.0, step=10.0)
+        
+        descrizione = st.text_area("Descrizione Lavori Eseguiti (Tagliando, Freni, Olio...)")
+        
+        submitted = st.form_submit_button("Salva nel Database", type="primary", use_container_width=True)
+        
+        if submitted:
+            if not targa or not cliente:
+                st.error("⚠️ I campi Targa e Cliente sono obbligatori.")
+            else:
+                doc_ref = db.collection("veicoli").document(targa)
+                doc = doc_ref.get()
+                
+                nuovo_intervento = {
+                    "data": str(data_intervento),
+                    "descrizione": descrizione,
+                    "costo": costo,
+                    "operatore": st.session_state.get("current_user", "Admin")
+                }
+                
+                if doc.exists:
+                    # Aggiorna veicolo esistente aggiungendo l'intervento alla lista
+                    doc_ref.update({
+                        "km": km,
+                        "telefono": telefono,
+                        "interventi": firestore.ArrayUnion([nuovo_intervento])
+                    })
+                    st.success(f"✅ Nuovo intervento aggiunto al veicolo con targa {targa}!")
+                else:
+                    # Crea un nuovo documento veicolo
+                    doc_ref.set({
+                        "targa": targa,
+                        "cliente": cliente,
+                        "marca": marca,
+                        "modello": modello,
+                        "telefono": telefono,
+                        "km": km,
+                        "interventi": [nuovo_intervento]
+                    })
+                    st.success(f"✅ Veicolo {targa} e relativo intervento salvati con successo!")
 
-  st.divider()
-
-  # 6. STORICO MANUTENZIONI
-  st.subheader("📜 Storico Manutenzioni")
-  storico_lista = v.get("storico_interventi", [])
-
-  if not storico_lista:
-    st.info("Nessun intervento registrato.")
-  else:
-    interventi_per_anno = {}
-    for intv in storico_lista:
-      data_int = intv.get("data", "01/01/2026")
-      try:
-        anno = data_int.split("/")[-1]
-      except:
-        anno = "Altro"
-
-      if anno not in interventi_per_anno:
-        interventi_per_anno[anno] = []
-      interventi_per_anno[anno].append(intv)
-
-    for anno in sorted(interventi_per_anno.keys(), reverse=True):
-      st.write(f"### 📅 Anno {anno}")
-      for intv in reversed(interventi_per_anno[anno]):
-        st.info(
-            f"🔧 **{intv.get('lavoro')}**  \nData: {intv.get('data')} | Km:"
-            f" {intv.get('km'):,} | Costo: € {intv.get('costo'):.2f}".replace(
-                ",", "."
-            )
-        )
-
-else:
-  st.info(
-      "👈 Apri il menu a sinistra per selezionare o aggiungere un veicolo!"
-  )
+# -----------------------------------------------------------------------------
+# 7. SCHERMATA: RICERCA TARGA
+# -----------------------------------------------------------------------------
+elif menu == "🔍 Ricerca Targa":
+    st.title("🔍 Ricerca Veicolo per Targa")
+    
+    search_targa = st.text_input("Inserisci la Targa da cercare").upper().strip()
+    
+    if search_targa:
+        doc_ref = db.collection("veicoli").document(search_targa)
+        doc = doc_ref.get()
+        
+        if doc.exists:
+            v = doc.to_dict()
+            st.success(f"Veicolo Trovato: {v.get('marca')} {v.get('modello')}")
+            
+            col1, col2 = st.columns(2)
+            col1.metric("Cliente", v.get("cliente"))
+            col1.metric("Telefono", v.get("telefono"))
+            col2.metric("Ultimi Km Registrati", f"{v.get('km')} km")
+            
+            st.subheader("Interventi Effettuati")
+            for i in reversed(v.get("interventi", [])):
+                st.info(f"📅 **{i.get('data')}** — Costo: **{i.get('costo')} €**\n\n{i.get('descrizione')}")
+        else:
+            st.warning(f"Nessun veicolo trovato con la targa **{search_targa}**.")
