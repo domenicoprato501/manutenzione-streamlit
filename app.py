@@ -56,10 +56,11 @@ if not dati:
             else:
                 st.error("Inserisci una targa valida.")
 else:
-    # SELEZIONE VEICOLO E SIDEBAR
+    # SELEZIONE VEICOLO
     targhe = list(dati.keys())
     targa_selezionata = st.sidebar.selectbox("🚘 Seleziona Veicolo", targhe)
     v = dati[targa_selezionata]
+    storico_lista = v.get("storico_interventi", [])
 
     # === BARRA LATERALE (SIDEBAR) ===
     with st.sidebar:
@@ -76,14 +77,11 @@ else:
                 st.success("Km aggiornati!")
                 st.rerun()
 
-        # === PULSANTE DOWNLOAD CSV NELLA SIDEBAR (Solo se c'è uno storico) ===
-        storico_lista = v.get("storico_interventi", [])
-        
+        # === PULSANTE CSV NELLA SIDEBAR (Compare solo se c'è uno storico) ===
         if storico_lista:
             st.divider()
             st.subheader("📊 Esporta Dati")
             
-            # Preparazione DataFrame per export
             df_storico = pd.DataFrame(storico_lista)
             df_csv = df_storico.rename(columns={
                 "data": "Data",
@@ -115,7 +113,31 @@ else:
     # 2. INSERIMENTO NUOVO INTERVENTO
     st.subheader("🛠️ Registra Nuovo Intervento")
     
-    with st.expander("➕ Clicca qui per aggiungere una manutenzione"):
+    # Popover / Pulsante Rapido per Intervento Generico
+    if hasattr(st, "popover"):
+        with st.popover("🛠️ INTERVENTO GENERICO / RAPIDO"):
+            with st.form("form_rapido"):
+                st.write("**Inserimento Rapido Intervento**")
+                data_r = st.date_input("Data", key="data_r").strftime("%d/%m/%Y")
+                km_r = st.number_input("Km", min_value=0, value=int(v.get("km_attuali", 0)), key="km_r")
+                lavoro_r = st.text_input("Descrizione lavoro", key="lavoro_r")
+                costo_r = st.number_input("Costo (€)", min_value=0.0, format="%.2f", key="costo_r")
+                
+                if st.form_submit_button("SALVA RAPIDO"):
+                    if lavoro_r.strip():
+                        v.setdefault("storico_interventi", []).append({
+                            "data": data_r, "km": km_r, "lavoro": lavoro_r, "costo": costo_r
+                        })
+                        if km_r > v.get("km_attuali", 0):
+                            v["km_attuali"] = km_r
+                        salva_dati(dati)
+                        st.success("Intervento salvato!")
+                        st.rerun()
+                    else:
+                        st.error("Inserisci una descrizione.")
+
+    # Form Completo Espandibile
+    with st.expander("➕ Form Completo Intervento"):
         with st.form("form_intervento"):
             c1, c2 = st.columns(2)
             with c1:
@@ -137,7 +159,6 @@ else:
                     }
                     v.setdefault("storico_interventi", []).append(nuovo_registro)
                     
-                    # Se i km dell'intervento sono maggiori dei km attuali, aggiorna automaticamente i km del veicolo
                     if km_int > v.get("km_attuali", 0):
                         v["km_attuali"] = km_int
                         
