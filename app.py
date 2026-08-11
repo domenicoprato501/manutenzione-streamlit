@@ -9,19 +9,18 @@ from firebase_admin import credentials, firestore, auth as admin_auth
 st.set_page_config(page_title="Gestione Parco Auto", layout="wide", page_icon="🚗")
 
 # ==========================================
-# 1. INIZIALIZZAZIONE FIREBASE ADMIN
+# 1. INIZIALIZZAZIONE FIREBASE ADMIN & AUTH
 # ==========================================
 if not firebase_admin._apps:
     try:
         firebase_secrets = st.secrets["firebase"]
         
-        # Gestisce il caso in cui il JSON sia racchiuso in 'text_key'
+        # Caricamento credenziali sia da stringa JSON (text_key) che da chiavi dirette
         if "text_key" in firebase_secrets:
             key_dict = json.loads(firebase_secrets["text_key"])
         else:
             key_dict = dict(firebase_secrets)
             
-        # Pulisce i caratteri newline della private_key per il Cloud
         if "private_key" in key_dict:
             key_dict["private_key"] = key_dict["private_key"].replace("\\n", "\n")
             
@@ -34,54 +33,43 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# Recupera l'API Key dal dizionario decodificato o dai secrets standard
+# Recupero della Firebase Web API Key
+FIREBASE_API_KEY = None
 try:
-    if "text_key" in st.secrets["firebase"]:
+    if "api_key" in st.secrets["firebase"]:
+        FIREBASE_API_KEY = st.secrets["firebase"]["api_key"]
+    elif "text_key" in st.secrets["firebase"]:
         key_dict_temp = json.loads(st.secrets["firebase"]["text_key"])
-        FIREBASE_API_KEY = key_dict_temp.get("api_key") or st.secrets["firebase"].get("api_key")
-    else:
-        FIREBASE_API_KEY = st.secrets["firebase"].get("api_key")
+        FIREBASE_API_KEY = key_dict_temp.get("api_key")
 except Exception:
     FIREBASE_API_KEY = None
 
 # ==========================================
-# 2. FUNZIONI DI SUPPORTO
+# 2. FUNZIONI DI SUPPORTO AUTH & FORMATTAZIONE
 # ==========================================
 def login_con_firebase_rest(email, password):
-    """Verifica le credenziali dell'utente tramite la REST API di Firebase Auth."""
     if not FIREBASE_API_KEY:
-        raise Exception("Chiave 'api_key' non trovata nella configurazione di Firebase.")
+        raise Exception("Chiave 'api_key' non trovata nei secrets di Streamlit.")
         
     url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_API_KEY}"
-    payload = {
-        "email": email,
-        "password": password,
-        "returnSecureToken": True
-    }
+    payload = {"email": email, "password": password, "returnSecureToken": True}
     response = requests.post(url, json=payload)
     data = response.json()
     
     if "error" in data:
         msg = data["error"]["message"]
         if msg in ["EMAIL_NOT_FOUND", "INVALID_PASSWORD", "INVALID_LOGIN_CREDENTIALS"]:
-            raise Exception("Credenziali non valide. Verifica email/username e password.")
+            raise Exception("Credenziali errate. Verifica email/username e password.")
         elif msg == "USER_DISABLED":
             raise Exception("Account disabilitato.")
         else:
             raise Exception(msg)
-            
     return data
 
 def ottieni_email_da_identificatore(identificatore):
-    """
-    Se l'identificatore contiene '@' viene restituito direttamente come email.
-    Altrimenti cerca il documento dello username nella collezione 'utenti' su Firestore.
-    """
     identificatore = identificatore.strip().lower()
-    
     if "@" in identificatore:
         return identificatore
-        
     doc_ref = db.collection("utenti").document(identificatore).get()
     if doc_ref.exists:
         return doc_ref.to_dict().get("email")
@@ -93,7 +81,7 @@ def format_km(valore):
     except (ValueError, TypeError):
         return "0"
 
-# Inizializzazione Stato Sessione
+# Inizializzazione Session State
 if "autenticato" not in st.session_state:
     st.session_state.autenticato = False
 if "utente_corrente" not in st.session_state:
@@ -102,95 +90,75 @@ if "username_corrente" not in st.session_state:
     st.session_state.username_corrente = None
 
 # ==========================================
-# 3. SCHERMATA ACCESSO / REGISTRAZIONE
+# 3. ACCESSO / REGISTRAZIONE UTENTI
 # ==========================================
 if not st.session_state.autenticato:
-    st.title("🚗 Gestione Parco Auto")
+    st.title("🚗 Gestione Parco Auto & Manutenzioni")
     
     tab_login, tab_registrazione = st.tabs(["🔑 Accedi", "📝 Registrati"])
     
-    # --- SCHEDA ACCESSO ---
     with tab_login:
-        st.subheader("Accedi al tuo account")
-        input_login = st.text_input("Email o Username", key="login_input").strip().lower()
+        st.subheader("Accedi al sistema")
+        input_login = st.text_input("Email o Username", key="login_user").strip().lower()
         password_login = st.text_input("Password", type="password", key="login_pass").strip()
         
         if st.button("ACCEDI", use_container_width=True):
             if not input_login or not password_login:
-                st.error("Inserisci sia l'email/username che la password.")
+                st.error("Inserisci credenziali valide.")
             else:
                 try:
                     email_target = ottieni_email_da_identificatore(input_login)
-                    
                     if not email_target:
-                        st.error("Username non trovato nel database.")
+                        st.error("Username non trovato.")
                     else:
                         login_con_firebase_rest(email_target, password_login)
                         
-                        # Recupera lo username corrispondente per l'interfaccia
                         username_trovato = None
-                        utenti_query = db.collection("utenti").where("email", "==", email_target).limit(1).get()
-                        for doc in utenti_query:
+                        utenti = db.collection("utenti").where("email", "==", email_target).limit(1).get()
+                        for doc in utenti:
                             username_trovato = doc.id
                             
                         st.session_state.autenticato = True
                         st.session_state.utente_corrente = email_target
                         st.session_state.username_corrente = username_trovato or email_target
-                        
                         st.success("Accesso eseguito!")
                         st.rerun()
-                        
                 except Exception as e:
                     st.error(f"Errore di accesso: {e}")
 
-    # --- SCHEDA REGISTRAZIONE ---
     with tab_registrazione:
-        st.subheader("Crea un nuovo account")
-        username_reg = st.text_input("Scegli Username", key="reg_user").strip().lower()
-        email_reg = st.text_input("La tua Email", key="reg_email").strip().lower()
-        password_reg = st.text_input("Scegli Password (min. 6 caratteri)", type="password", key="reg_pass").strip()
+        st.subheader("Registra un nuovo account")
+        username_reg = st.text_input("Username", key="reg_user").strip().lower()
+        email_reg = st.text_input("Email", key="reg_email").strip().lower()
+        password_reg = st.text_input("Password (minimo 6 caratteri)", type="password", key="reg_pass").strip()
         
         if st.button("REGISTRATI", use_container_width=True):
             if not username_reg or not email_reg or not password_reg:
-                st.error("Compila tutti i campi richiesti.")
+                st.error("Compila tutti i campi.")
             elif "@" in username_reg:
                 st.error("Lo username non può contenere la '@'.")
             elif len(password_reg) < 6:
-                st.error("La password deve contenere almeno 6 caratteri.")
+                st.error("La password deve essere di almeno 6 caratteri.")
             else:
                 try:
-                    # Check esistenza username
-                    doc_username = db.collection("utenti").document(username_reg).get()
-                    if doc_username.exists:
-                        st.error("Questo Username è già in uso. Scegline un altro.")
+                    if db.collection("utenti").document(username_reg).get().exists:
+                        st.error("Username già in uso.")
                     else:
-                        # Crea utente in Firebase Auth
-                        user_record = admin_auth.create_user(
-                            email=email_reg,
-                            password=password_reg,
-                            display_name=username_reg
-                        )
-                        
-                        # Mappa Username -> Email su Firestore
-                        db.collection("utenti").document(username_reg).set({
-                            "email": email_reg,
-                            "uid": user_record.uid
-                        })
-                        
-                        st.success("Registrazione completata! Ora puoi effettuare l'accesso.")
-                        
+                        user = admin_auth.create_user(email=email_reg, password=password_reg, display_name=username_reg)
+                        db.collection("utenti").document(username_reg).set({"email": email_reg, "uid": user.uid})
+                        st.success("Registrazione effettuata! Ora puoi accedere.")
                 except admin_auth.EmailAlreadyExistsError:
-                    st.error("Questa email risulta già registrata.")
+                    st.error("Email già registrata.")
                 except Exception as e:
-                    st.error(f"Errore durante la registrazione: {e}")
+                    st.error(f"Errore di registrazione: {e}")
 
 # ==========================================
-# 4. APPLICAZIONE PRINCIPALE
+# 4. DASHBOARD COMPLETA MANUTENZIONI & REVISIONI
 # ==========================================
 else:
     veicoli_ref = db.collection("veicoli")
     
-    # Barra superiore con Logout
+    # Intestazione Utente
     col_t, col_out = st.columns([4, 1])
     with col_t:
         st.title("🚗 Gestione Parco Auto & Manutenzioni")
@@ -202,139 +170,179 @@ else:
             st.session_state.username_corrente = None
             st.rerun()
 
-    # Lettura veicoli
+    # Lettura Veicoli
     docs = veicoli_ref.stream()
     dati = {doc.id: doc.to_dict() for doc in docs}
 
     if not dati:
-        st.info("Nessun veicolo presente. Aggiungi la prima targa per iniziare.")
-        
+        st.info("Nessun veicolo presente nel parco auto. Aggiungi il primo veicolo.")
         with st.form("nuovo_veicolo_form"):
             st.write("### ➕ Aggiungi Nuovo Veicolo")
-            nuova_targa = st.text_input("Targa").upper().strip()
-            nuovo_modello = st.text_input("Modello / Descrizione")
-            km_iniziali = st.number_input("Chilometri Attuali", min_value=0, step=500)
+            targa_new = st.text_input("Targa").upper().strip()
+            modello_new = st.text_input("Modello / Descrizione")
+            km_new = st.number_input("Chilometri Attuali", min_value=0, step=500)
             
             if st.form_submit_button("Salva Veicolo"):
-                if nuova_targa:
-                    veicoli_ref.document(nuova_targa).set({
-                        "modello": nuovo_modello,
-                        "km_attuali": km_iniziali,
+                if targa_new:
+                    veicoli_ref.document(targa_new).set({
+                        "modello": modello_new,
+                        "km_attuali": km_new,
+                        "scadenza_revisione": "",
+                        "scadenza_bollo": "",
                         "storico_interventi": []
                     })
-                    st.success(f"Veicolo {nuova_targa} aggiunto!")
+                    st.success(f"Veicolo {targa_new} salvato!")
                     st.rerun()
-                else:
-                    st.error("Inserisci una targa valida.")
     else:
-        # Selezione Veicolo
+        # Selezione Veicolo Sidebar
         targhe = list(dati.keys())
         targa_selezionata = st.sidebar.selectbox("🚘 Seleziona Veicolo", targhe)
         v = dati[targa_selezionata]
-        storico_lista = v.get("storico_interventi", [])
+        storico = v.get("storico_interventi", [])
 
-        # Sidebar
+        # Sidebar con gestione Km e Scadenze
         with st.sidebar:
             st.divider()
             st.header(f"📌 {targa_selezionata}")
             st.caption(f"Modello: {v.get('modello', 'N/D')}")
             
+            # Modifica Km
             nuovi_km = st.number_input("Chilometri Attuali", min_value=0, value=int(v.get("km_attuali", 0)), step=100)
             if nuovi_km != v.get("km_attuali"):
                 if st.button("💾 Aggiorna Km"):
                     veicoli_ref.document(targa_selezionata).update({"km_attuali": nuovi_km})
-                    st.success("Km aggiornati!")
+                    st.success("Chilometraggio aggiornato!")
                     st.rerun()
 
-            if storico_lista:
+            st.divider()
+            st.subheader("📅 Scadenze Legali")
+            
+            rev_val = v.get("scadenza_revisione", "")
+            bollo_val = v.get("scadenza_bollo", "")
+            
+            nuova_scad_rev = st.text_input("Scadenza Revisione (es. MM/AAAA)", value=rev_val)
+            nuova_scad_bollo = st.text_input("Scadenza Bollo (es. MM/AAAA)", value=bollo_val)
+            
+            if st.button("💾 Salva Scadenze"):
+                veicoli_ref.document(targa_selezionata).update({
+                    "scadenza_revisione": nuova_scad_rev,
+                    "scadenza_bollo": nuova_scad_bollo
+                })
+                st.success("Scadenze salvate!")
+                st.rerun()
+
+            # Esportazione
+            if storico:
                 st.divider()
-                st.subheader("📊 Esporta Dati")
-                df_csv = pd.DataFrame(storico_lista).rename(columns={
-                    "data": "Data",
-                    "lavoro": "Intervento",
-                    "km": "Chilometri",
-                    "costo": "Costo (€)"
-                })[["Data", "Chilometri", "Intervento", "Costo (€)"]]
-                
+                st.subheader("📊 Esportazione Dati")
+                df_exp = pd.DataFrame(storico)
                 st.download_button(
-                    label="📥 Scarica Storico CSV",
-                    data=df_csv.to_csv(index=False).encode("utf-8"),
-                    file_name=f"storico_{targa_selezionata}.csv",
+                    label="📥 Scarica Report CSV",
+                    data=df_exp.to_csv(index=False).encode("utf-8"),
+                    file_name=f"report_{targa_selezionata}.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
 
-        # Content Main
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Veicolo Selezionato", targa_selezionata)
-        with col2:
-            st.metric("Chilometraggio Attuale", f"{format_km(v.get('km_attuali', 0))} Km")
+        # Dashboard Metriche Principali
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Veicolo", targa_selezionata)
+        c2.metric("Chilometraggio", f"{format_km(v.get('km_attuali', 0))} Km")
+        c3.metric("Scadenza Revisione", v.get("scadenza_revisione") or "Non impostata")
+        c4.metric("Scadenza Bollo", v.get("scadenza_bollo") or "Non impostata")
 
         st.divider()
-        st.subheader("🛠️ Registra Nuovo Intervento")
 
-        if hasattr(st, "popover"):
-            with st.popover("🛠️ INTERVENTO RAPIDO"):
-                with st.form("form_rapido"):
-                    data_r = st.date_input("Data", key="data_r").strftime("%d/%m/%Y")
-                    km_r = st.number_input("Km", min_value=0, value=int(v.get("km_attuali", 0)), key="km_r")
-                    lavoro_r = st.text_input("Descrizione lavoro", key="lavoro_r")
-                    costo_r = st.number_input("Costo (€)", min_value=0.0, format="%.2f", key="costo_r")
-                    
-                    if st.form_submit_button("SALVA RAPIDO"):
-                        if lavoro_r.strip():
-                            storico_lista.append({"data": data_r, "km": km_r, "lavoro": lavoro_r, "costo": costo_r})
-                            veicoli_ref.document(targa_selezionata).update({
-                                "storico_interventi": storico_lista,
-                                "km_attuali": max(km_r, v.get("km_attuali", 0))
-                            })
-                            st.success("Intervento salvato!")
-                            st.rerun()
-                        else:
-                            st.error("Inserisci una descrizione.")
+        # ==========================================
+        # FORM REGISTRAZIONE MANUTENZIONI E REVISIONI
+        # ==========================================
+        st.subheader("🛠️ Registra Intervento o Revisione")
 
-        with st.expander("➕ Form Completo Intervento"):
-            with st.form("form_intervento"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    data_int = st.date_input("Data Intervento").strftime("%d/%m/%Y")
-                    km_int = st.number_input("Chilometri all'intervento", min_value=0, value=int(v.get("km_attuali", 0)))
-                with c2:
-                    costo_int = st.number_input("Costo (€)", min_value=0.0, format="%.2f")
-                    lavoro_int = st.text_input("Descrizione Intervento")
+        # Categorie Manutenzione
+        CATEGORIE_INTERVENTO = [
+            "Tagliando Completo",
+            "Cambio Olio e Filtri",
+            "Freni (Pasticche / Dischi)",
+            "Cinghia di Distribuzione",
+            "Pneumatici / Cambio Stagionale",
+            "Batteria",
+            "Revisione Ministeriale",
+            "Ricarica Clima",
+            "Riparazione Meccanica",
+            "Altro"
+        ]
 
-                if st.form_submit_button("💾 SALVA INTERVENTO"):
-                    if lavoro_int.strip():
-                        storico_lista.append({
-                            "data": data_int,
-                            "km": km_int,
-                            "lavoro": lavoro_int,
-                            "costo": costo_int
-                        })
-                        veicoli_ref.document(targa_selezionata).update({
-                            "storico_interventi": storico_lista,
-                            "km_attuali": max(km_int, v.get("km_attuali", 0))
-                        })
-                        st.success("Intervento registrato!")
-                        st.rerun()
-                    else:
-                        st.error("Inserisci la descrizione dell'intervento.")
-
-        st.divider()
-        st.subheader("📜 STORICO MANUTENZIONI")
-
-        if not storico_lista:
-            st.caption("Nessun intervento registrato.")
-        else:
-            interventi_per_anno = {}
-            for item in storico_lista:
-                anno = item.get("data", "").split("/")[-1] if "/" in item.get("data", "") else "Altro"
-                interventi_per_anno.setdefault(anno, []).append(item)
-
-            for anno in sorted(interventi_per_anno.keys(), reverse=True):
-                totale = sum(i.get("costo", 0.0) for i in interventi_per_anno[anno])
-                st.markdown(f"#### 📅 --- ANNO {anno} (Totale Spesa: {totale:.2f}€) ---")
+        with st.expander("➕ Inserisci Dettaglio Manutenzione / Revisione", expanded=True):
+            with st.form("form_dettaglio_intervento"):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    data_i = st.date_input("Data Intervento").strftime("%d/%m/%Y")
+                    km_i = st.number_input("Km all'intervento", min_value=0, value=int(v.get("km_attuali", 0)))
+                    categoria_i = st.selectbox("Tipo / Categoria Intervento", CATEGORIE_INTERVENTO)
                 
-                for item in reversed(interventi_per_anno[anno]):
-                    st.info(f"🔧 **{item.get('lavoro', 'Intervento')}**\n\n🗓️ Data: {item.get('data', 'N/D')} | 📍 Km: {format_km(item.get('km', 0))} | 💶 Spesa: {item.get('costo', 0.0):.2f}€")
+                with col_b:
+                    costo_i = st.number_input("Costo (€)", min_value=0.0, format="%.2f")
+                    officina_i = st.text_input("Officina / Meccanico")
+                    dettagli_i = st.text_area("Note / Componenti Sostituiti", placeholder="Es. Sostituite pasticche anteriori e liquido freni...")
+
+                if st.form_submit_button("💾 SALVA INTERVENTO NEL DATABASE"):
+                    if categoria_i:
+                        nuovo_record = {
+                            "data": data_i,
+                            "km": km_i,
+                            "categoria": categoria_i,
+                            "costo": costo_i,
+                            "officina": officina_i,
+                            "note": dettagli_i
+                        }
+                        
+                        storico.append(nuovo_record)
+                        
+                        # Se è una revisione, aggiorna anche la scadenza (fra 2 anni)
+                        aggiornamenti = {
+                            "storico_interventi": storico,
+                            "km_attuali": max(km_i, v.get("km_attuali", 0))
+                        }
+                        
+                        veicoli_ref.document(targa_selezionata).update(aggiornamenti)
+                        st.success(f"Intervento '{categoria_i}' salvato con successo!")
+                        st.rerun()
+
+        st.divider()
+
+        # ==========================================
+        # STORICO DETTAGLIATO E RAGGRUPPATO
+        # ==========================================
+        st.subheader("📜 STORICO COMPLETO MANUTENZIONI E REVISIONI")
+
+        if not storico:
+            st.info("Nessuna manutenzione o revisione salvata per questo veicolo.")
+        else:
+            # Raggruppamento per Anno
+            interventi_anno = {}
+            for item in storico:
+                parti_data = item.get("data", "").split("/")
+                anno = parti_data[-1] if len(parti_data) == 3 else "Varie"
+                interventi_anno.setdefault(anno, []).append(item)
+
+            for anno in sorted(interventi_anno.keys(), reverse=True):
+                spesa_totale_anno = sum(i.get("costo", 0.0) for i in interventi_anno[anno])
+                st.markdown(f"### 📅 Anno {anno} — Totale Spesa: **{spesa_totale_anno:.2f} €**")
+                
+                for idx, item in enumerate(reversed(interventi_anno[anno])):
+                    cat = item.get("categoria", "Manutenzione Generica")
+                    costo = item.get("costo", 0.0)
+                    km_rec = format_km(item.get("km", 0))
+                    dt = item.get("data", "N/D")
+                    off = item.get("officina", "")
+                    note = item.get("note", "")
+                    
+                    titolo_box = f"🔧 **{cat}** | 🗓️ {dt} | 📍 {km_rec} Km | 💶 {costo:.2f} €"
+                    if off:
+                        titolo_box += f" | 🏢 Officina: {off}"
+                        
+                    with st.expander(titolo_box):
+                        if note:
+                            st.write(f"**Dettagli e Note:** {note}")
+                        else:
+                            st.caption("Nessuna nota aggiuntiva inserita.")
