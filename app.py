@@ -420,7 +420,6 @@ else:
                 st.markdown("---")
                 st.markdown("##### 🔩 Pezzi di Ricambio Utilizzati")
 
-                # Ciclo dinamico per le righe di ricambio con tasto + ed elimina
                 for idx, r_item in enumerate(st.session_state.lista_ricambi_tmp):
                     c_cod, c_desc, c_prz, c_del = st.columns([3, 4, 3, 1])
                     
@@ -453,7 +452,6 @@ else:
                 st.markdown("---")
                 if st.form_submit_button("💾 SALVA SCHEDA COMPLETA", use_container_width=True, key="btn_save_complete"):
                     if categoria_c:
-                        # Pulisce e filtra solo i ricambi inseriti
                         ricambi_validi = []
                         for r in st.session_state.lista_ricambi_tmp:
                             if r["codice"].strip() or r["descrizione"].strip() or r["prezzo"] > 0:
@@ -484,10 +482,7 @@ else:
                             upd["km_ultimo_tagliando"] = km_c
                             
                         veicoli_ref.document(doc_id_attuale).update(upd)
-                        
-                        # Resetta il Form dei ricambi per il prossimo inserimento
                         st.session_state.lista_ricambi_tmp = [{"codice": "", "descrizione": "", "prezzo": 0.0}]
-                        
                         st.success(f"Intervento completo '{categoria_c}' registrato con successo!")
                         st.rerun()
 
@@ -512,60 +507,82 @@ else:
         st.divider()
 
         # ==========================================
-        # 7. STORICO MANUTENZIONI CON VISUALIZZAZIONE RICAMBI
+        # 7. STORICO MANUTENZIONI (MODIFICA ED ELIMINAZIONE)
         # ==========================================
         st.subheader("📜 STORICO INTERVENTI & RICAMBI")
 
         if not storico:
             st.info("Nessun intervento registrato per questa auto.")
         else:
-            interventi_per_anno = {}
-            for item in storico:
-                parti = item.get("data", "").split("/")
-                anno = parti[-1] if len(parti) == 3 else "Vari"
-                interventi_per_anno.setdefault(anno, []).append(item)
+            # Iteriamo direttamente sullo storico mantenendo l'indice originale per eliminazioni/modifiche
+            for idx, item in list(enumerate(storico))[::-1]:
+                tipo_int = item.get("tipo", "Rapida")
+                cat = item.get("categoria", item.get("lavoro", "Manutenzione"))
+                costo = item.get("costo", 0.0)
+                km_i = format_km(item.get("km", 0))
+                dt = item.get("data", "N/D")
+                off = item.get("officina", "")
+                note = item.get("note", "")
+                lavoro = item.get("lavoro", "")
 
-            for anno in sorted(interventi_per_anno.keys(), reverse=True):
-                totale_spesa_anno = sum(i.get("costo", 0.0) for i in interventi_per_anno[anno])
-                st.markdown(f"### 📅 Anno {anno} — Spesa Totale: **{totale_spesa_anno:.2f} €**")
+                badg = "⚡ RAPIDA" if tipo_int == "Rapida" else "🛠️ COMPLETA"
+                titolo_expander = f"[{badg}] {cat} | 🗓️ {dt} | 📍 {km_i} Km | 💶 {costo:.2f} €"
                 
-                for item in reversed(interventi_per_anno[anno]):
-                    tipo_int = item.get("tipo", "Rapida")
-                    cat = item.get("categoria", item.get("lavoro", "Manutenzione"))
-                    costo = item.get("costo", 0.0)
-                    km_i = format_km(item.get("km", 0))
-                    dt = item.get("data", "N/D")
-                    off = item.get("officina", "")
-                    note = item.get("note", "")
-                    lavoro = item.get("lavoro", "")
-
-                    badg = "⚡ RAPIDA" if tipo_int == "Rapida" else "🛠️ COMPLETA"
-                    titolo_expander = f"[{badg}] {cat} | 🗓️ {dt} | 📍 {km_i} Km | 💶 {costo:.2f} €"
+                with st.expander(titolo_expander):
+                    st.write(f"**Lavoro Eseguito:** {lavoro}")
+                    if off and off != "-":
+                        st.write(f"**Officina:** {off}")
                     
-                    with st.expander(titolo_expander):
-                        st.write(f"**Lavoro Eseguito:** {lavoro}")
-                        if off and off != "-":
-                            st.write(f"**Officina:** {off}")
-                        
-                        # Supporto per la nuova lista ricambi multipli + retrocompatibilità con i vecchi singoli ricambi
-                        lista_ricambi = item.get("ricambi", [])
-                        
-                        # Se non c'è la lista ricambi ma esistono i vecchi campi singoli
-                        if not lista_ricambi:
-                            c_ric = item.get("codice_ricambio", "")
-                            d_ric = item.get("descrizione_ricambio", "")
-                            p_ric = item.get("prezzo_ricambio", 0.0)
-                            if c_ric or d_ric or p_ric > 0:
-                                lista_ricambi = [{"codice": c_ric, "descrizione": d_ric, "prezzo": p_ric}]
+                    lista_ricambi = item.get("ricambi", [])
+                    if not lista_ricambi:
+                        c_ric = item.get("codice_ricambio", "")
+                        d_ric = item.get("descrizione_ricambio", "")
+                        p_ric = item.get("prezzo_ricambio", 0.0)
+                        if c_ric or d_ric or p_ric > 0:
+                            lista_ricambi = [{"codice": c_ric, "descrizione": d_ric, "prezzo": p_ric}]
 
-                        if lista_ricambi:
-                            st.markdown("---")
-                            st.markdown("**🔩 Pezzi di Ricambio Utilizzati:**")
-                            for r in lista_ricambi:
-                                c_col1, c_col2, c_col3 = st.columns(3)
-                                c_col1.write(f"🏷️ **Codice:** `{r.get('codice', '-') or '-'}`")
-                                c_col2.write(f"📝 **Descrizione:** {r.get('descrizione', '-') or '-'}")
-                                c_col3.write(f"💶 **Costo:** {r.get('prezzo', 0.0):.2f} €")
+                    if lista_ricambi:
+                        st.markdown("---")
+                        st.markdown("**🔩 Pezzi di Ricambio Utilizzati:**")
+                        for r in lista_ricambi:
+                            c_col1, c_col2, c_col3 = st.columns(3)
+                            c_col1.write(f"🏷️ **Codice:** `{r.get('codice', '-') or '-'}`")
+                            c_col2.write(f"📝 **Descrizione:** {r.get('descrizione', '-') or '-'}")
+                            c_col3.write(f"💶 **Costo:** {r.get('prezzo', 0.0):.2f} €")
 
-                        if note:
-                            st.write(f"**Note/Dettagli:** {note}")
+                    if note:
+                        st.write(f"**Note/Dettagli:** {note}")
+
+                    st.markdown("---")
+                    
+                    # Tasti per Gestione (Modifica ed Elimina)
+                    btn_col1, btn_col2 = st.columns([1, 1])
+                    
+                    if btn_col1.button("🗑️ Elimina Intervento", key=f"btn_del_hist_{idx}"):
+                        storico.pop(idx)
+                        veicoli_ref.document(doc_id_attuale).update({"storico_interventi": storico})
+                        st.success("Intervento eliminato con successo!")
+                        st.rerun()
+
+                    # Form integrato per la modifica veloce della voce
+                    with btn_col2.popover("✏️ Modifica Intervento"):
+                        with st.form(key=f"form_edit_{idx}"):
+                            mod_data = st.text_input("Data (GG/MM/AAAA)", value=dt, key=f"e_dt_{idx}")
+                            mod_km = st.number_input("Km", value=int(item.get("km", 0)), key=f"e_km_{idx}")
+                            mod_lavoro = st.text_input("Descrizione / Lavoro", value=lavoro, key=f"e_lab_{idx}")
+                            mod_costo = st.number_input("Costo (€)", value=float(costo), format="%.2f", key=f"e_cost_{idx}")
+                            mod_officina = st.text_input("Officina", value=off, key=f"e_off_{idx}")
+                            mod_note = st.text_area("Note", value=note, key=f"e_nt_{idx}")
+                            
+                            if st.form_submit_button("💾 Salva Modifiche"):
+                                storico[idx]["data"] = mod_data
+                                storico[idx]["km"] = mod_km
+                                storico[idx]["lavoro"] = mod_lavoro
+                                storico[idx]["categoria"] = mod_lavoro
+                                storico[idx]["costo"] = mod_costo
+                                storico[idx]["officina"] = mod_officina
+                                storico[idx]["note"] = mod_note
+                                
+                                veicoli_ref.document(doc_id_attuale).update({"storico_interventi": storico})
+                                st.success("Intervento aggiornato!")
+                                st.rerun()
