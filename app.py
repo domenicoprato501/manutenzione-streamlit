@@ -6,7 +6,6 @@ from datetime import date
 # ==========================================
 st.set_page_config(page_title="Gestione Manutenzione", layout="wide")
 
-# Cataloghi di esempio (sostituisci o popola con i tuoi dati reali)
 CATALOGO_RICAMBI = {
     "-- Seleziona o scrivi a mano --": 0.0,
     "Filtro Olio": 15.00,
@@ -20,19 +19,16 @@ opzioni_catalogo = list(CATALOGO_RICAMBI.keys())
 # ==========================================
 # 2. INIZIALIZZAZIONE DELLO STATO (Session State)
 # ==========================================
-# Inizializza la lista dei ricambi con una riga vuota di default
 if "ricambi_manutenzione" not in st.session_state:
     st.session_state.ricambi_manutenzione = [
         {"ricambio_scelto": "-- Seleziona o scrivi a mano --", "nome_custom": "", "quantita": 1.0, "prezzo": 0.0}
     ]
 
-# Funzione per aggiungere una nuova riga quando si clicca sul tasto "+"
 def aggiungi_riga():
     st.session_state.ricambi_manutenzione.append(
         {"ricambio_scelto": "-- Seleziona o scrivi a mano --", "nome_custom": "", "quantita": 1.0, "prezzo": 0.0}
     )
 
-# Funzione per rimuovere una riga specificata
 def rimuovi_riga(index):
     if len(st.session_state.ricambi_manutenzione) > 1:
         st.session_state.ricambi_manutenzione.pop(index)
@@ -43,7 +39,6 @@ def rimuovi_riga(index):
 st.title("🛠️ Inserimento Manutenzione")
 
 with st.form("form_manutenzione"):
-    # --- DATI MANUTENZIONE ---
     st.subheader("Dettagli Intervento")
     col_desc, col_data = st.columns([3, 1])
     descrizione = col_desc.text_input("Descrizione Manutenzione *", placeholder="Es. Tagliando completo")
@@ -67,7 +62,6 @@ with st.form("form_manutenzione"):
         )
         item["ricambio_scelto"] = scelta
 
-        # Prezzo predefinito dal catalogo (se selezionato)
         prezzo_default = CATALOGO_RICAMBI[scelta] if scelta != "-- Seleziona o scrivi a mano --" else item["prezzo"]
 
         # 2. Testo libero per ricambio manuale
@@ -103,10 +97,10 @@ with st.form("form_manutenzione"):
         cols[4].metric("Totale Riga", f"{totale_riga:.2f} €")
         totale_manutenzione += totale_riga
 
-        # 6. Pulsante Elimina riga
+        # 6. Pulsante Elimina riga (AGGIUNTA LA KEY UNIVOCA key=f"del_{i}")
         cols[5].write("")
         cols[5].write("")
-        cols[5].form_submit_button("🗑️", on_click=rimuovi_riga, args=(i,))
+        cols[5].form_submit_button("🗑️", on_click=rimuovi_riga, args=(i,), key=f"del_{i}")
 
     # --- PULSANTE PER AGGIUNGERE UN ALTRO RICAMBIO ---
     st.form_submit_button("➕ Aggiungi altro ricambio", on_click=aggiungi_riga)
@@ -126,7 +120,6 @@ if invia:
     if not descrizione.strip():
         st.error("Inserisci la descrizione della manutenzione.")
     else:
-        # Prepara la lista pulita dei ricambi inseriti
         ricambi_finali = []
         for r in st.session_state.ricambi_manutenzione:
             nome = r["nome_custom"] if r["ricambio_scelto"] == "-- Seleziona o scrivi a mano --" else r["ricambio_scelto"]
@@ -145,6 +138,5 @@ if invia:
             "ricambi": ricambi_finali
         }
 
-        # Sostituisci questo blocco con la tua funzione di salvataggio su Database
         st.success("✅ Manutenzione salvata con successo!")
         st.json(dati_salvataggio)
