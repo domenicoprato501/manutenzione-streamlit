@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import json
+from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore, auth as admin_auth
 
@@ -15,7 +16,6 @@ if not firebase_admin._apps:
     try:
         firebase_secrets = st.secrets["firebase"]
         
-        # Caricamento credenziali sia da stringa JSON (text_key) che da chiavi dirette
         if "text_key" in firebase_secrets:
             key_dict = json.loads(firebase_secrets["text_key"])
         else:
@@ -33,7 +33,7 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# Recupero della Firebase Web API Key
+# Recupero Firebase Web API Key
 FIREBASE_API_KEY = None
 try:
     if "api_key" in st.secrets["firebase"]:
@@ -45,7 +45,7 @@ except Exception:
     FIREBASE_API_KEY = None
 
 # ==========================================
-# 2. FUNZIONI DI SUPPORTO AUTH & FORMATTAZIONE
+# 2. FUNZIONI UTILI & CALCOLO SCADENZE
 # ==========================================
 def login_con_firebase_rest(email, password):
     if not FIREBASE_API_KEY:
@@ -81,7 +81,29 @@ def format_km(valore):
     except (ValueError, TypeError):
         return "0"
 
-# Inizializzazione Session State
+def verifica_stato_scadenza(data_str):
+    if not data_str:
+        return "non_impostata", "⚪ Non Impostata"
+    try:
+        parti = data_str.strip().split("/")
+        if len(parti) == 2:
+            mese, anno = int(parti[0]), int(parti[1])
+        elif len(parti) == 3:
+            mese, anno = int(parti[1]), int(parti[2])
+        else:
+            return "sconosciuta", f"❓ {data_str}"
+
+        oggi = datetime.now()
+        if anno < oggi.year or (anno == oggi.year and mese < oggi.month):
+            return "scaduta", f"🚨 SCADUTO ({data_str})"
+        elif anno == oggi.year and mese == oggi.month:
+            return "in_scadenza", f"⚠️ IN SCADENZA ({data_str})"
+        else:
+            return "valida", f"✅ REGOLARE ({data_str})"
+    except Exception:
+        return "sconosciuta", f"ℹ️ {data_str}"
+
+# Stato Sessione
 if "autenticato" not in st.session_state:
     st.session_state.autenticato = False
 if "utente_corrente" not in st.session_state:
@@ -93,18 +115,18 @@ if "username_corrente" not in st.session_state:
 # 3. ACCESSO / REGISTRAZIONE UTENTI
 # ==========================================
 if not st.session_state.autenticato:
-    st.title("🚗 Gestione Parco Auto & Manutenzioni")
+    st.title("🚗 Gestione Parco Auto Personale")
     
     tab_login, tab_registrazione = st.tabs(["🔑 Accedi", "📝 Registrati"])
     
     with tab_login:
-        st.subheader("Accedi al sistema")
+        st.subheader("Accedi ai tuoi veicoli")
         input_login = st.text_input("Email o Username", key="login_user").strip().lower()
         password_login = st.text_input("Password", type="password", key="login_pass").strip()
         
         if st.button("ACCEDI", use_container_width=True):
             if not input_login or not password_login:
-                st.error("Inserisci credenziali valide.")
+                st.error("Compila tutti i campi.")
             else:
                 try:
                     email_target = ottieni_email_da_identificatore(input_login)
@@ -127,10 +149,10 @@ if not st.session_state.autenticato:
                     st.error(f"Errore di accesso: {e}")
 
     with tab_registrazione:
-        st.subheader("Registra un nuovo account")
+        st.subheader("Crea un account personale")
         username_reg = st.text_input("Username", key="reg_user").strip().lower()
         email_reg = st.text_input("Email", key="reg_email").strip().lower()
-        password_reg = st.text_input("Password (minimo 6 caratteri)", type="password", key="reg_pass").strip()
+        password_reg = st.text_input("Password (min. 6 caratteri)", type="password", key="reg_pass").strip()
         
         if st.button("REGISTRATI", use_container_width=True):
             if not username_reg or not email_reg or not password_reg:
@@ -138,30 +160,29 @@ if not st.session_state.autenticato:
             elif "@" in username_reg:
                 st.error("Lo username non può contenere la '@'.")
             elif len(password_reg) < 6:
-                st.error("La password deve essere di almeno 6 caratteri.")
+                st.error("La password deve contenere almeno 6 caratteri.")
             else:
                 try:
                     if db.collection("utenti").document(username_reg).get().exists:
-                        st.error("Username già in uso.")
+                        st.error("Username già occupato.")
                     else:
                         user = admin_auth.create_user(email=email_reg, password=password_reg, display_name=username_reg)
                         db.collection("utenti").document(username_reg).set({"email": email_reg, "uid": user.uid})
-                        st.success("Registrazione effettuata! Ora puoi accedere.")
+                        st.success("Registrazione completata! Puoi accedere.")
                 except admin_auth.EmailAlreadyExistsError:
                     st.error("Email già registrata.")
                 except Exception as e:
-                    st.error(f"Errore di registrazione: {e}")
+                    st.error(f"Errore durante la registrazione: {e}")
 
 # ==========================================
-# 4. DASHBOARD COMPLETA MANUTENZIONI & REVISIONI
+# 4. DASHBOARD PERSONALIZZATA UTENTE
 # ==========================================
 else:
     veicoli_ref = db.collection("veicoli")
     
-    # Intestazione Utente
     col_t, col_out = st.columns([4, 1])
     with col_t:
-        st.title("🚗 Gestione Parco Auto & Manutenzioni")
+        st.title("🚗 Il Mio Parco Auto")
     with col_out:
         st.write(f"👤 Utente: **{st.session_state.username_corrente}**")
         if st.button("🚪 Esci"):
@@ -170,179 +191,329 @@ else:
             st.session_state.username_corrente = None
             st.rerun()
 
-    # Lettura Veicoli
-    docs = veicoli_ref.stream()
-    dati = {doc.id: doc.to_dict() for doc in docs}
+    # Filtro isolamento utenti
+    query_veicoli = veicoli_ref.where("utente", "==", st.session_state.utente_corrente).stream()
+    dati_veicoli = {}
+    for doc in query_veicoli:
+        dict_v = doc.to_dict()
+        targa_key = dict_v.get("targa", doc.id)
+        dati_veicoli[targa_key] = (doc.id, dict_v)
 
-    if not dati:
-        st.info("Nessun veicolo presente nel parco auto. Aggiungi il primo veicolo.")
-        with st.form("nuovo_veicolo_form"):
-            st.write("### ➕ Aggiungi Nuovo Veicolo")
-            targa_new = st.text_input("Targa").upper().strip()
-            modello_new = st.text_input("Modello / Descrizione")
+    if not dati_veicoli:
+        st.info("Nessun veicolo associato al tuo account. Aggiungi la tua prima auto.")
+        with st.form("form_primo_veicolo"):
+            st.subheader("➕ Aggiungi Nuovo Veicolo")
+            targa_new = st.text_input("Targa Auto").upper().strip()
+            modello_new = st.text_input("Marca / Modello (es. Fiat Punto 1.3 Multijet)")
             km_new = st.number_input("Chilometri Attuali", min_value=0, step=500)
+            scad_rev_new = st.text_input("Scadenza Revisione (MM/AAAA)", placeholder="es. 10/2026")
+            scad_bollo_new = st.text_input("Scadenza Bollo (MM/AAAA)", placeholder="es. 12/2026")
             
-            if st.form_submit_button("Salva Veicolo"):
+            if st.form_submit_button("💾 Salva Veicolo"):
                 if targa_new:
-                    veicoli_ref.document(targa_new).set({
+                    doc_id = f"{st.session_state.username_corrente}_{targa_new}"
+                    veicoli_ref.document(doc_id).set({
+                        "utente": st.session_state.utente_corrente,
+                        "username": st.session_state.username_corrente,
+                        "targa": targa_new,
                         "modello": modello_new,
                         "km_attuali": km_new,
-                        "scadenza_revisione": "",
-                        "scadenza_bollo": "",
+                        "scadenza_revisione": scad_rev_new,
+                        "scadenza_bollo": scad_bollo_new,
+                        "km_ultimo_tagliando": km_new,
                         "storico_interventi": []
                     })
-                    st.success(f"Veicolo {targa_new} salvato!")
+                    st.success(f"Veicolo {targa_new} inserito con successo!")
                     st.rerun()
+                else:
+                    st.error("Inserisci la targa del veicolo.")
     else:
-        # Selezione Veicolo Sidebar
-        targhe = list(dati.keys())
-        targa_selezionata = st.sidebar.selectbox("🚘 Seleziona Veicolo", targhe)
-        v = dati[targa_selezionata]
+        # Selezione Veicolo
+        targhe_disponibili = list(dati_veicoli.keys())
+        targa_selezionata = st.sidebar.selectbox("🚘 Seleziona Veicolo", targhe_disponibili)
+        doc_id_attuale, v = dati_veicoli[targa_selezionata]
         storico = v.get("storico_interventi", [])
 
-        # Sidebar con gestione Km e Scadenze
+        # Sidebar
         with st.sidebar:
             st.divider()
             st.header(f"📌 {targa_selezionata}")
             st.caption(f"Modello: {v.get('modello', 'N/D')}")
             
-            # Modifica Km
-            nuovi_km = st.number_input("Chilometri Attuali", min_value=0, value=int(v.get("km_attuali", 0)), step=100)
+            nuovi_km = st.number_input("Aggiorna Km Attuali", min_value=0, value=int(v.get("km_attuali", 0)), step=100)
             if nuovi_km != v.get("km_attuali"):
                 if st.button("💾 Aggiorna Km"):
-                    veicoli_ref.document(targa_selezionata).update({"km_attuali": nuovi_km})
-                    st.success("Chilometraggio aggiornato!")
+                    veicoli_ref.document(doc_id_attuale).update({"km_attuali": nuovi_km})
+                    st.success("Km aggiornati!")
                     st.rerun()
 
             st.divider()
-            st.subheader("📅 Scadenze Legali")
-            
-            rev_val = v.get("scadenza_revisione", "")
-            bollo_val = v.get("scadenza_bollo", "")
-            
-            nuova_scad_rev = st.text_input("Scadenza Revisione (es. MM/AAAA)", value=rev_val)
-            nuova_scad_bollo = st.text_input("Scadenza Bollo (es. MM/AAAA)", value=bollo_val)
-            
-            if st.button("💾 Salva Scadenze"):
-                veicoli_ref.document(targa_selezionata).update({
-                    "scadenza_revisione": nuova_scad_rev,
-                    "scadenza_bollo": nuova_scad_bollo
-                })
-                st.success("Scadenze salvate!")
-                st.rerun()
+            st.subheader("➕ Aggiungi altro Veicolo")
+            with st.expander("Nuova Auto"):
+                with st.form("form_altro_veicolo"):
+                    t_new = st.text_input("Targa").upper().strip()
+                    m_new = st.text_input("Modello")
+                    k_new = st.number_input("Km", min_value=0, step=500)
+                    if st.form_submit_button("Aggiungi"):
+                        if t_new:
+                            id_new = f"{st.session_state.username_corrente}_{t_new}"
+                            veicoli_ref.document(id_new).set({
+                                "utente": st.session_state.utente_corrente,
+                                "username": st.session_state.username_corrente,
+                                "targa": t_new,
+                                "modello": m_new,
+                                "km_attuali": k_new,
+                                "scadenza_revisione": "",
+                                "scadenza_bollo": "",
+                                "km_ultimo_tagliando": k_new,
+                                "storico_interventi": []
+                            })
+                            st.rerun()
 
-            # Esportazione
             if storico:
                 st.divider()
-                st.subheader("📊 Esportazione Dati")
-                df_exp = pd.DataFrame(storico)
+                st.subheader("📊 Esportazione")
+                df_csv = pd.DataFrame(storico)
                 st.download_button(
                     label="📥 Scarica Report CSV",
-                    data=df_exp.to_csv(index=False).encode("utf-8"),
-                    file_name=f"report_{targa_selezionata}.csv",
+                    data=df_csv.to_csv(index=False).encode("utf-8"),
+                    file_name=f"storico_{targa_selezionata}.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
 
-        # Dashboard Metriche Principali
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Veicolo", targa_selezionata)
-        c2.metric("Chilometraggio", f"{format_km(v.get('km_attuali', 0))} Km")
-        c3.metric("Scadenza Revisione", v.get("scadenza_revisione") or "Non impostata")
-        c4.metric("Scadenza Bollo", v.get("scadenza_bollo") or "Non impostata")
+        # ==========================================
+        # 5. AVVISI & SCADENZE
+        # ==========================================
+        st.subheader("⚠️ Avvisi & Scadenze Veicolo")
+        
+        stato_rev, msg_rev = verifica_stato_scadenza(v.get("scadenza_revisione"))
+        stato_bollo, msg_bollo = verifica_stato_scadenza(v.get("scadenza_bollo"))
+        
+        km_attuali = v.get("km_attuali", 0)
+        km_ultimo_tagl = v.get("km_ultimo_tagliando", 0)
+        km_da_tagliando = km_attuali - km_ultimo_tagl
+        
+        c_rev, c_bollo, c_tagl = st.columns(3)
+        
+        with c_rev:
+            st.metric("Revisione Ministeriale", v.get("scadenza_revisione") or "N/D")
+            if stato_rev == "scaduta":
+                st.error(msg_rev)
+            elif stato_rev == "in_scadenza":
+                st.warning(msg_rev)
+            else:
+                st.success(msg_rev)
+
+        with c_bollo:
+            st.metric("Bollo Auto", v.get("scadenza_bollo") or "N/D")
+            if stato_bollo == "scaduta":
+                st.error(msg_bollo)
+            elif stato_bollo == "in_scadenza":
+                st.warning(msg_bollo)
+            else:
+                st.success(msg_bollo)
+
+        with c_tagl:
+            st.metric("Km dall'ultimo Tagliando", f"{format_km(km_da_tagliando)} Km")
+            if km_da_tagliando >= 15000:
+                st.error(f"🚨 TAGLIANDO CONSIGLIATO (+{format_km(km_da_tagliando)} Km)")
+            elif km_da_tagliando >= 12000:
+                st.warning(f"⚠️ Tagliando Vicino ({format_km(km_da_tagliando)} Km)")
+            else:
+                st.success("✅ Tagliando OK")
 
         st.divider()
 
         # ==========================================
-        # FORM REGISTRAZIONE MANUTENZIONI E REVISIONI
+        # 6. REGISTRAZIONE MANUTENZIONI CON RICAMBI
         # ==========================================
-        st.subheader("🛠️ Registra Intervento o Revisione")
+        st.subheader("🛠️ Registra Intervento Manutenzione")
 
-        # Categorie Manutenzione
-        CATEGORIE_INTERVENTO = [
-            "Tagliando Completo",
-            "Cambio Olio e Filtri",
-            "Freni (Pasticche / Dischi)",
-            "Cinghia di Distribuzione",
-            "Pneumatici / Cambio Stagionale",
-            "Batteria",
-            "Revisione Ministeriale",
-            "Ricarica Clima",
-            "Riparazione Meccanica",
-            "Altro"
-        ]
+        tab_rapida, tab_completa, tab_scadenze = st.tabs([
+            "⚡ Manutenzione Rapida", 
+            "🛠️ Manutenzione Completa (con Ricambi)",
+            "📅 Aggiorna Scadenze Legali"
+        ])
 
-        with st.expander("➕ Inserisci Dettaglio Manutenzione / Revisione", expanded=True):
-            with st.form("form_dettaglio_intervento"):
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    data_i = st.date_input("Data Intervento").strftime("%d/%m/%Y")
-                    km_i = st.number_input("Km all'intervento", min_value=0, value=int(v.get("km_attuali", 0)))
-                    categoria_i = st.selectbox("Tipo / Categoria Intervento", CATEGORIE_INTERVENTO)
-                
-                with col_b:
-                    costo_i = st.number_input("Costo (€)", min_value=0.0, format="%.2f")
-                    officina_i = st.text_input("Officina / Meccanico")
-                    dettagli_i = st.text_area("Note / Componenti Sostituiti", placeholder="Es. Sostituite pasticche anteriori e liquido freni...")
+        # --- TAB 1: MANUTENZIONE RAPIDA ---
+        with tab_rapida:
+            st.caption("Registrazione rapida di spesa e descrizione senza dettagli aggiuntivi.")
+            with st.form("form_rapido"):
+                c_r1, c_r2, c_r3 = st.columns([1, 1, 1])
+                with c_r1:
+                    data_r = st.date_input("Data Intervento", key="dt_r").strftime("%d/%m/%Y")
+                    km_r = st.number_input("Km al momento", min_value=0, value=int(km_attuali), key="km_r")
+                with c_r2:
+                    lavoro_r = st.text_input("Descrizione lavoro veloce", placeholder="Es. Rabbocco liquido lavavetri", key="lab_r")
+                    costo_r = st.number_input("Costo Totale (€)", min_value=0.0, format="%.2f", key="c_r")
+                with c_r3:
+                    st.write("")
+                    st.write("")
+                    btn_rapido = st.form_submit_button("⚡ SALVA RAPIDO", use_container_width=True)
 
-                if st.form_submit_button("💾 SALVA INTERVENTO NEL DATABASE"):
-                    if categoria_i:
-                        nuovo_record = {
-                            "data": data_i,
-                            "km": km_i,
-                            "categoria": categoria_i,
-                            "costo": costo_i,
-                            "officina": officina_i,
-                            "note": dettagli_i
+                if btn_rapido:
+                    if lavoro_r.strip():
+                        nuovo_i = {
+                            "tipo": "Rapida",
+                            "data": data_r,
+                            "km": km_r,
+                            "categoria": "Generica / Rapida",
+                            "lavoro": lavoro_r,
+                            "costo": costo_r,
+                            "officina": "-",
+                            "codice_ricambio": "",
+                            "descrizione_ricambio": "",
+                            "prezzo_ricambio": 0.0,
+                            "note": ""
                         }
-                        
-                        storico.append(nuovo_record)
-                        
-                        # Se è una revisione, aggiorna anche la scadenza (fra 2 anni)
-                        aggiornamenti = {
+                        storico.append(nuovo_i)
+                        veicoli_ref.document(doc_id_attuale).update({
                             "storico_interventi": storico,
-                            "km_attuali": max(km_i, v.get("km_attuali", 0))
+                            "km_attuali": max(km_r, km_attuali)
+                        })
+                        st.success("Intervento rapido registrato!")
+                        st.rerun()
+                    else:
+                        st.error("Inserisci la descrizione del lavoro.")
+
+        # --- TAB 2: MANUTENZIONE COMPLETA CON CODICE E PREZZO RICAMBIO ---
+        with tab_completa:
+            st.caption("Scheda dettagliata con officina, campo ricambi (codice/descrizione/prezzo) e azzeramento tagliando.")
+            CATEGORIE = [
+                "Tagliando Completo",
+                "Cambio Olio e Filtri",
+                "Freni (Pasticche / Dischi)",
+                "Cinghia di Distribuzione",
+                "Pneumatici / Cambio Stagionale",
+                "Batteria",
+                "Revisione Ministeriale",
+                "Ricarica Clima",
+                "Riparazione Meccanica",
+                "Altro"
+            ]
+            with st.form("form_completo"):
+                ca, cb = st.columns(2)
+                with ca:
+                    data_c = st.date_input("Data Intervento", key="dt_c").strftime("%d/%m/%Y")
+                    km_c = st.number_input("Chilometraggio", min_value=0, value=int(km_attuali), key="km_c")
+                    categoria_c = st.selectbox("Categoria Intervento", CATEGORIE, key="cat_c")
+                    officina_c = st.text_input("Officina / Meccanico", placeholder="Es. Garage Rossi SRL", key="off_c")
+                
+                with cb:
+                    costo_c = st.number_input("Costo Totale Intervento (€)", min_value=0.0, format="%.2f", key="c_c")
+                    note_c = st.text_area("Note e Dettagli Aggiuntivi", placeholder="Es. Sostituito olio 5W30 e filtro aria.", key="nt_c")
+                    is_tagliando = st.checkbox("Segna come Tagliando Completo (Azzera i km dal prossimo tagliando)", value=(categoria_c in ["Tagliando Completo", "Cambio Olio e Filtri"]))
+
+                st.markdown("---")
+                st.markdown("##### 🔩 Dettaglio Pezzo di Ricambio (Opzionale)")
+                cr1, cr2, cr3 = st.columns(3)
+                with cr1:
+                    cod_ric = st.text_input("Codice Ricambio", placeholder="Es. BOSCH-0986479098", key="cod_ric")
+                with cr2:
+                    desc_ric = st.text_input("Descrizione Ricambio", placeholder="Es. Dischi Freno Anteriori", key="desc_ric")
+                with cr3:
+                    prz_ric = st.number_input("Prezzo Ricambio (€)", min_value=0.0, format="%.2f", key="prz_ric")
+
+                if st.form_submit_button("💾 SALVA SCHEDA COMPLETA", use_container_width=True):
+                    if categoria_c:
+                        nuovo_c = {
+                            "tipo": "Completa",
+                            "data": data_c,
+                            "km": km_c,
+                            "categoria": categoria_c,
+                            "lavoro": categoria_c,
+                            "costo": costo_c,
+                            "officina": officina_c,
+                            "codice_ricambio": cod_ric.strip(),
+                            "descrizione_ricambio": desc_ric.strip(),
+                            "prezzo_ricambio": prz_ric,
+                            "note": note_c
                         }
+                        storico.append(nuovo_c)
                         
-                        veicoli_ref.document(targa_selezionata).update(aggiornamenti)
-                        st.success(f"Intervento '{categoria_i}' salvato con successo!")
+                        upd = {
+                            "storico_interventi": storico,
+                            "km_attuali": max(km_c, km_attuali)
+                        }
+                        if is_tagliando:
+                            upd["km_ultimo_tagliando"] = km_c
+                            
+                        veicoli_ref.document(doc_id_attuale).update(upd)
+                        st.success(f"Intervento completo '{categoria_c}' registrato con successo!")
                         st.rerun()
 
+        # --- TAB 3: AGGIORNA SCADENZE ---
+        with tab_scadenze:
+            with st.form("form_aggiorna_scadenze"):
+                st.write("Modifica le date di scadenza legali per il veicolo:")
+                c_s1, c_s2 = st.columns(2)
+                with c_s1:
+                    nuova_rev = st.text_input("Nuova Scadenza Revisione (MM/AAAA)", value=v.get("scadenza_revisione", ""))
+                with c_s2:
+                    nuovo_bollo = st.text_input("Nuova Scadenza Bollo (MM/AAAA)", value=v.get("scadenza_bollo", ""))
+                
+                if st.form_submit_button("💾 Salva Nuove Scadenze"):
+                    veicoli_ref.document(doc_id_attuale).update({
+                        "scadenza_revisione": nuova_rev,
+                        "scadenza_bollo": nuovo_bollo
+                    })
+                    st.success("Scadenze aggiornate!")
+                    st.rerun()
+
         st.divider()
 
         # ==========================================
-        # STORICO DETTAGLIATO E RAGGRUPPATO
+        # 7. STORICO MANUTENZIONI CON VISUALIZZAZIONE RICAMBI
         # ==========================================
-        st.subheader("📜 STORICO COMPLETO MANUTENZIONI E REVISIONI")
+        st.subheader("📜 STORICO INTERVENTI & RICAMBI")
 
         if not storico:
-            st.info("Nessuna manutenzione o revisione salvata per questo veicolo.")
+            st.info("Nessun intervento registrato per questa auto.")
         else:
-            # Raggruppamento per Anno
-            interventi_anno = {}
+            interventi_per_anno = {}
             for item in storico:
-                parti_data = item.get("data", "").split("/")
-                anno = parti_data[-1] if len(parti_data) == 3 else "Varie"
-                interventi_anno.setdefault(anno, []).append(item)
+                parti = item.get("data", "").split("/")
+                anno = parti[-1] if len(parti) == 3 else "Vari"
+                interventi_per_anno.setdefault(anno, []).append(item)
 
-            for anno in sorted(interventi_anno.keys(), reverse=True):
-                spesa_totale_anno = sum(i.get("costo", 0.0) for i in interventi_anno[anno])
-                st.markdown(f"### 📅 Anno {anno} — Totale Spesa: **{spesa_totale_anno:.2f} €**")
+            for anno in sorted(interventi_per_anno.keys(), reverse=True):
+                totale_spesa_anno = sum(i.get("costo", 0.0) for i in interventi_per_anno[anno])
+                st.markdown(f"### 📅 Anno {anno} — Spesa Totale: **{totale_spesa_anno:.2f} €**")
                 
-                for idx, item in enumerate(reversed(interventi_anno[anno])):
-                    cat = item.get("categoria", "Manutenzione Generica")
+                for item in reversed(interventi_per_anno[anno]):
+                    tipo_int = item.get("tipo", "Rapida")
+                    cat = item.get("categoria", item.get("lavoro", "Manutenzione"))
                     costo = item.get("costo", 0.0)
-                    km_rec = format_km(item.get("km", 0))
+                    km_i = format_km(item.get("km", 0))
                     dt = item.get("data", "N/D")
                     off = item.get("officina", "")
                     note = item.get("note", "")
+                    lavoro = item.get("lavoro", "")
+
+                    c_ric = item.get("codice_ricambio", "")
+                    d_ric = item.get("descrizione_ricambio", "")
+                    p_ric = item.get("prezzo_ricambio", 0.0)
+
+                    badg = "⚡ RAPIDA" if tipo_int == "Rapida" else "🛠️ COMPLETA"
+                    titolo_expander = f"[{badg}] {cat} | 🗓️ {dt} | 📍 {km_i} Km | 💶 {costo:.2f} €"
                     
-                    titolo_box = f"🔧 **{cat}** | 🗓️ {dt} | 📍 {km_rec} Km | 💶 {costo:.2f} €"
-                    if off:
-                        titolo_box += f" | 🏢 Officina: {off}"
+                    with st.expander(titolo_expander):
+                        st.write(f"**Lavoro Eseguito:** {lavoro}")
+                        if off and off != "-":
+                            st.write(f"**Officina:** {off}")
                         
-                    with st.expander(titolo_box):
+                        # Sezione Ricambi nel Dettaglio
+                        if c_ric or d_ric or p_ric > 0:
+                            st.markdown("---")
+                            st.markdown("**🔩 Pezzo di Ricambio Sostituito:**")
+                            c_col1, c_col2, c_col3 = st.columns(3)
+                            if c_ric:
+                                c_col1.write(f"🏷️ **Codice:** `{c_ric}`")
+                            if d_ric:
+                                c_col2.write(f"📝 **Descrizione:** {d_ric}")
+                            if p_ric > 0:
+                                c_col3.write(f"💶 **Costo Ricambio:** {p_ric:.2f} €")
+
                         if note:
-                            st.write(f"**Dettagli e Note:** {note}")
-                        else:
-                            st.caption("Nessuna nota aggiuntiva inserita.")
+                            st.write(f"**Note/Dettagli:** {note}")
