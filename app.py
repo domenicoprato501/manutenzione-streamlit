@@ -2,16 +2,17 @@ import streamlit as st
 from datetime import date
 
 # ==========================================
-# 1. CONFIGURAZIONE PAGINA
+# 1. CONFIGURAZIONE PAGINA E CATALOGO
 # ==========================================
-st.set_page_config(page_title="Gestione Manutenzione", layout="wide")
+st.set_page_config(page_title="Gestione Manutenzioni & Revisioni", layout="wide")
 
+# Catalogo con Codice Articolo e Prezzo Unitario
 CATALOGO_RICAMBI = {
-    "-- Seleziona o scrivi a mano --": 0.0,
-    "Filtro Olio": 15.00,
-    "Olio Motore 5W30 (Litri)": 12.50,
-    "Filtro Aria": 22.00,
-    "Pastiglie Freno": 45.00
+    "-- Seleziona o scrivi a mano --": {"codice": "", "prezzo": 0.0},
+    "Filtro Olio": {"codice": "FO-102", "prezzo": 15.00},
+    "Olio Motore 5W30 (Litri)": {"codice": "OM-5W30", "prezzo": 12.50},
+    "Filtro Aria": {"codice": "FA-204", "prezzo": 22.00},
+    "Pastiglie Freno": {"codice": "PF-301", "prezzo": 45.00}
 }
 
 opzioni_catalogo = list(CATALOGO_RICAMBI.keys())
@@ -21,12 +22,24 @@ opzioni_catalogo = list(CATALOGO_RICAMBI.keys())
 # ==========================================
 if "ricambi_manutenzione" not in st.session_state:
     st.session_state.ricambi_manutenzione = [
-        {"ricambio_scelto": "-- Seleziona o scrivi a mano --", "nome_custom": "", "quantita": 1.0, "prezzo": 0.0}
+        {
+            "ricambio_scelto": "-- Seleziona o scrivi a mano --",
+            "codice_articolo": "",
+            "nome_custom": "",
+            "quantita": 1.0,
+            "prezzo": 0.0
+        }
     ]
 
 def aggiungi_riga():
     st.session_state.ricambi_manutenzione.append(
-        {"ricambio_scelto": "-- Seleziona o scrivi a mano --", "nome_custom": "", "quantita": 1.0, "prezzo": 0.0}
+        {
+            "ricambio_scelto": "-- Seleziona o scrivi a mano --",
+            "codice_articolo": "",
+            "nome_custom": "",
+            "quantita": 1.0,
+            "prezzo": 0.0
+        }
     )
 
 def rimuovi_riga(index):
@@ -34,15 +47,21 @@ def rimuovi_riga(index):
         st.session_state.ricambi_manutenzione.pop(index)
 
 # ==========================================
-# 3. INTERFACCIA UTENTE (FORM MANUTENZIONE)
+# 3. INTERFACCIA UTENTE
 # ==========================================
-st.title("🛠️ Inserimento Manutenzione")
+st.title("🛠️ Inserimento Manutenzione & Revisione")
 
 with st.form("form_manutenzione"):
-    st.subheader("Dettagli Intervento")
-    col_desc, col_data = st.columns([3, 1])
-    descrizione = col_desc.text_input("Descrizione Manutenzione *", placeholder="Es. Tagliando completo")
+    # --- SEZIONE MANUTENZIONE & REVISIONE ---
+    st.subheader("Dettagli Intervento & Revisione")
+    col_desc, col_data, col_rev = st.columns([2, 1, 1])
+    
+    descrizione = col_desc.text_input("Descrizione Manutenzione *", placeholder="Es. Tagliando e revisione periodica")
     data_intervento = col_data.date_input("Data Intervento", value=date.today())
+    stato_revisione = col_rev.selectbox(
+        "Stato Revisione",
+        ["Non richiesta", "In Corso", "Superata", "Da Ripetere"]
+    )
 
     st.markdown("---")
     st.subheader("📦 Ricambi Utilizzati")
@@ -51,31 +70,43 @@ with st.form("form_manutenzione"):
 
     # --- CICLO SULLE RIGHE DEI RICAMBI ---
     for i, item in enumerate(st.session_state.ricambi_manutenzione):
-        cols = st.columns([3, 3, 2, 2, 2, 1])
+        cols = st.columns([2.5, 2, 2, 1.2, 1.5, 1.5, 0.8])
 
-        # 1. Menu a tendina per catalogo
+        # 1. Selezione da Catalogo
         scelta = cols[0].selectbox(
-            "Ricambio da Catalogo",
+            "Ricambio Catalogo",
             options=opzioni_catalogo,
             index=opzioni_catalogo.index(item["ricambio_scelto"]) if item["ricambio_scelto"] in opzioni_catalogo else 0,
             key=f"scelta_{i}"
         )
         item["ricambio_scelto"] = scelta
 
-        prezzo_default = CATALOGO_RICAMBI[scelta] if scelta != "-- Seleziona o scrivi a mano --" else item["prezzo"]
-
-        # 2. Testo libero per ricambio manuale
         is_custom = (scelta == "-- Seleziona o scrivi a mano --")
+
+        # Valori di default da catalogo o manuali
+        codice_default = CATALOGO_RICAMBI[scelta]["codice"] if not is_custom else item["codice_articolo"]
+        prezzo_default = CATALOGO_RICAMBI[scelta]["prezzo"] if not is_custom else item["prezzo"]
+
+        # 2. Nome Custom (se non in catalogo)
         item["nome_custom"] = cols[1].text_input(
-            "O scrivi manualmente",
+            "Nome (se manuale)",
             value=item["nome_custom"],
             disabled=not is_custom,
             placeholder="Nome ricambio...",
             key=f"custom_{i}"
         )
 
-        # 3. Quantità
-        item["quantita"] = cols[2].number_input(
+        # 3. Codice Articolo
+        item["codice_articolo"] = cols[2].text_input(
+            "Codice Articolo",
+            value=codice_default,
+            disabled=not is_custom,
+            placeholder="Es. ART-12345",
+            key=f"cod_{i}"
+        )
+
+        # 4. Quantità
+        item["quantita"] = cols[3].number_input(
             "Quantità",
             min_value=0.1,
             value=float(item["quantita"]),
@@ -83,8 +114,8 @@ with st.form("form_manutenzione"):
             key=f"qta_{i}"
         )
 
-        # 4. Prezzo Unitario
-        item["prezzo"] = cols[3].number_input(
+        # 5. Prezzo Unitario
+        item["prezzo"] = cols[4].number_input(
             "Prezzo Unit. (€)",
             min_value=0.0,
             value=float(prezzo_default),
@@ -92,29 +123,29 @@ with st.form("form_manutenzione"):
             key=f"prezzo_{i}"
         )
 
-        # 5. Calcolo automatico del totale di riga
+        # 6. Totale Riga (calcolo automatico)
         totale_riga = round(item["quantita"] * item["prezzo"], 2)
-        cols[4].metric("Totale Riga", f"{totale_riga:.2f} €")
+        cols[5].metric("Totale Riga", f"{totale_riga:.2f} €")
         totale_manutenzione += totale_riga
 
-        # 6. Pulsante Elimina riga (AGGIUNTA LA KEY UNIVOCA key=f"del_{i}")
-        cols[5].write("")
-        cols[5].write("")
-        cols[5].form_submit_button("🗑️", on_click=rimuovi_riga, args=(i,), key=f"del_{i}")
+        # 7. Pulsante Elimina con chiave univoca
+        cols[6].write("")
+        cols[6].write("")
+        cols[6].form_submit_button("🗑️", on_click=rimuovi_riga, args=(i,), key=f"del_{i}")
 
-    # --- PULSANTE PER AGGIUNGERE UN ALTRO RICAMBIO ---
-    st.form_submit_button("➕ Aggiungi altro ricambio", on_click=aggiungi_riga)
+    # --- PULSANTE (+) PER AGGIUNGERE RIGHE ---
+    st.form_submit_button("➕ Aggiungi altro ricambio", on_click=aggiungi_riga, key="btn_add_part")
 
     st.markdown("---")
 
-    # --- TOTALE GENERALE E CONFERMA ---
+    # --- TOTALE E CONFERMA ---
     col_tot, col_btn = st.columns([2, 1])
     col_tot.markdown(f"### 💰 **Totale Manutenzione: {totale_manutenzione:.2f} €**")
     
-    invia = col_btn.form_submit_button("💾 Salva Manutenzione", type="primary")
+    invia = col_btn.form_submit_button("💾 Salva Manutenzione e Revisione", type="primary", key="btn_save")
 
 # ==========================================
-# 4. GESTIONE INVIO DATI
+# 4. GESTIONE SALVATAGGIO
 # ==========================================
 if invia:
     if not descrizione.strip():
@@ -122,9 +153,13 @@ if invia:
     else:
         ricambi_finali = []
         for r in st.session_state.ricambi_manutenzione:
-            nome = r["nome_custom"] if r["ricambio_scelto"] == "-- Seleziona o scrivi a mano --" else r["ricambio_scelto"]
+            is_cat = (r["ricambio_scelto"] != "-- Seleziona o scrivi a mano --")
+            nome = r["ricambio_scelto"] if is_cat else r["nome_custom"]
+            codice = CATALOGO_RICAMBI[r["ricambio_scelto"]]["codice"] if is_cat else r["codice_articolo"]
+
             if nome.strip():
                 ricambi_finali.append({
+                    "codice_articolo": codice,
                     "ricambio": nome,
                     "quantita": r["quantita"],
                     "prezzo_unitario": r["prezzo"],
@@ -134,9 +169,10 @@ if invia:
         dati_salvataggio = {
             "descrizione": descrizione,
             "data": str(data_intervento),
+            "stato_revisione": stato_revisione,
             "totale_intervento": round(totale_manutenzione, 2),
             "ricambi": ricambi_finali
         }
 
-        st.success("✅ Manutenzione salvata con successo!")
+        st.success("✅ Manutenzione e Revisione salvate con successo!")
         st.json(dati_salvataggio)
