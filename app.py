@@ -103,13 +103,26 @@ def verifica_stato_scadenza(data_str):
     except Exception:
         return "sconosciuta", f"ℹ️ {data_str}"
 
-# Stato Sessione
+# Stato Sessione Generale
 if "autenticato" not in st.session_state:
     st.session_state.autenticato = False
 if "utente_corrente" not in st.session_state:
     st.session_state.utente_corrente = None
 if "username_corrente" not in st.session_state:
     st.session_state.username_corrente = None
+
+# Stato Sessione per Gestione Ricambi Multipli Dinamici
+if "lista_ricambi_tmp" not in st.session_state:
+    st.session_state.lista_ricambi_tmp = [
+        {"codice": "", "descrizione": "", "prezzo": 0.0}
+    ]
+
+def aggiungi_riga_ricambio():
+    st.session_state.lista_ricambi_tmp.append({"codice": "", "descrizione": "", "prezzo": 0.0})
+
+def rimuovi_riga_ricambio(index):
+    if len(st.session_state.lista_ricambi_tmp) > 1:
+        st.session_state.lista_ricambi_tmp.pop(index)
 
 # ==========================================
 # 3. ACCESSO / REGISTRAZIONE UTENTI
@@ -362,9 +375,7 @@ else:
                             "lavoro": lavoro_r,
                             "costo": costo_r,
                             "officina": "-",
-                            "codice_ricambio": "",
-                            "descrizione_ricambio": "",
-                            "prezzo_ricambio": 0.0,
+                            "ricambi": [],
                             "note": ""
                         }
                         storico.append(nuovo_i)
@@ -377,9 +388,9 @@ else:
                     else:
                         st.error("Inserisci la descrizione del lavoro.")
 
-        # --- TAB 2: MANUTENZIONE COMPLETA CON CODICE E PREZZO RICAMBIO ---
+        # --- TAB 2: MANUTENZIONE COMPLETA CON RICAMBI MULTIPLI (+) ---
         with tab_completa:
-            st.caption("Scheda dettagliata con officina, campo ricambi (codice/descrizione/prezzo) e azzeramento tagliando.")
+            st.caption("Scheda dettagliata con officina, ricambi multipli (codice/descrizione/prezzo) e azzeramento tagliando.")
             CATEGORIE = [
                 "Tagliando Completo",
                 "Cambio Olio e Filtri",
@@ -392,6 +403,7 @@ else:
                 "Riparazione Meccanica",
                 "Altro"
             ]
+            
             with st.form("form_completo"):
                 ca, cb = st.columns(2)
                 with ca:
@@ -406,17 +418,51 @@ else:
                     is_tagliando = st.checkbox("Segna come Tagliando Completo (Azzera i km dal prossimo tagliando)", value=(categoria_c in ["Tagliando Completo", "Cambio Olio e Filtri"]))
 
                 st.markdown("---")
-                st.markdown("##### 🔩 Dettaglio Pezzo di Ricambio (Opzionale)")
-                cr1, cr2, cr3 = st.columns(3)
-                with cr1:
-                    cod_ric = st.text_input("Codice Ricambio", placeholder="Es. BOSCH-0986479098", key="cod_ric")
-                with cr2:
-                    desc_ric = st.text_input("Descrizione Ricambio", placeholder="Es. Dischi Freno Anteriori", key="desc_ric")
-                with cr3:
-                    prz_ric = st.number_input("Prezzo Ricambio (€)", min_value=0.0, format="%.2f", key="prz_ric")
+                st.markdown("##### 🔩 Pezzi di Ricambio Utilizzati")
 
-                if st.form_submit_button("💾 SALVA SCHEDA COMPLETA", use_container_width=True):
+                # Ciclo dinamico per le righe di ricambio con tasto + ed elimina
+                for idx, r_item in enumerate(st.session_state.lista_ricambi_tmp):
+                    c_cod, c_desc, c_prz, c_del = st.columns([3, 4, 3, 1])
+                    
+                    r_item["codice"] = c_cod.text_input(
+                        "Codice Ricambio", 
+                        value=r_item["codice"], 
+                        placeholder="Es. BOSCH-0986479098", 
+                        key=f"dyn_cod_{idx}"
+                    )
+                    r_item["descrizione"] = c_desc.text_input(
+                        "Descrizione Ricambio", 
+                        value=r_item["descrizione"], 
+                        placeholder="Es. Dischi Freno Anteriori", 
+                        key=f"dyn_desc_{idx}"
+                    )
+                    r_item["prezzo"] = c_prz.number_input(
+                        "Prezzo (€)", 
+                        min_value=0.0, 
+                        value=float(r_item["prezzo"]), 
+                        format="%.2f", 
+                        key=f"dyn_prz_{idx}"
+                    )
+                    
+                    c_del.write("")
+                    c_del.write("")
+                    c_del.form_submit_button("🗑️", on_click=rimuovi_riga_ricambio, args=(idx,), key=f"dyn_del_{idx}")
+
+                st.form_submit_button("➕ Aggiungi altro ricambio", on_click=aggiungi_riga_ricambio, key="btn_add_part")
+
+                st.markdown("---")
+                if st.form_submit_button("💾 SALVA SCHEDA COMPLETA", use_container_width=True, key="btn_save_complete"):
                     if categoria_c:
+                        # Pulisce e filtra solo i ricambi inseriti
+                        ricambi_validi = []
+                        for r in st.session_state.lista_ricambi_tmp:
+                            if r["codice"].strip() or r["descrizione"].strip() or r["prezzo"] > 0:
+                                ricambi_validi.append({
+                                    "codice": r["codice"].strip(),
+                                    "descrizione": r["descrizione"].strip(),
+                                    "prezzo": r["prezzo"]
+                                })
+
                         nuovo_c = {
                             "tipo": "Completa",
                             "data": data_c,
@@ -425,9 +471,7 @@ else:
                             "lavoro": categoria_c,
                             "costo": costo_c,
                             "officina": officina_c,
-                            "codice_ricambio": cod_ric.strip(),
-                            "descrizione_ricambio": desc_ric.strip(),
-                            "prezzo_ricambio": prz_ric,
+                            "ricambi": ricambi_validi,
                             "note": note_c
                         }
                         storico.append(nuovo_c)
@@ -440,6 +484,10 @@ else:
                             upd["km_ultimo_tagliando"] = km_c
                             
                         veicoli_ref.document(doc_id_attuale).update(upd)
+                        
+                        # Resetta il Form dei ricambi per il prossimo inserimento
+                        st.session_state.lista_ricambi_tmp = [{"codice": "", "descrizione": "", "prezzo": 0.0}]
+                        
                         st.success(f"Intervento completo '{categoria_c}' registrato con successo!")
                         st.rerun()
 
@@ -491,10 +539,6 @@ else:
                     note = item.get("note", "")
                     lavoro = item.get("lavoro", "")
 
-                    c_ric = item.get("codice_ricambio", "")
-                    d_ric = item.get("descrizione_ricambio", "")
-                    p_ric = item.get("prezzo_ricambio", 0.0)
-
                     badg = "⚡ RAPIDA" if tipo_int == "Rapida" else "🛠️ COMPLETA"
                     titolo_expander = f"[{badg}] {cat} | 🗓️ {dt} | 📍 {km_i} Km | 💶 {costo:.2f} €"
                     
@@ -503,17 +547,25 @@ else:
                         if off and off != "-":
                             st.write(f"**Officina:** {off}")
                         
-                        # Sezione Ricambi nel Dettaglio
-                        if c_ric or d_ric or p_ric > 0:
+                        # Supporto per la nuova lista ricambi multipli + retrocompatibilità con i vecchi singoli ricambi
+                        lista_ricambi = item.get("ricambi", [])
+                        
+                        # Se non c'è la lista ricambi ma esistono i vecchi campi singoli
+                        if not lista_ricambi:
+                            c_ric = item.get("codice_ricambio", "")
+                            d_ric = item.get("descrizione_ricambio", "")
+                            p_ric = item.get("prezzo_ricambio", 0.0)
+                            if c_ric or d_ric or p_ric > 0:
+                                lista_ricambi = [{"codice": c_ric, "descrizione": d_ric, "prezzo": p_ric}]
+
+                        if lista_ricambi:
                             st.markdown("---")
-                            st.markdown("**🔩 Pezzo di Ricambio Sostituito:**")
-                            c_col1, c_col2, c_col3 = st.columns(3)
-                            if c_ric:
-                                c_col1.write(f"🏷️ **Codice:** `{c_ric}`")
-                            if d_ric:
-                                c_col2.write(f"📝 **Descrizione:** {d_ric}")
-                            if p_ric > 0:
-                                c_col3.write(f"💶 **Costo Ricambio:** {p_ric:.2f} €")
+                            st.markdown("**🔩 Pezzi di Ricambio Utilizzati:**")
+                            for r in lista_ricambi:
+                                c_col1, c_col2, c_col3 = st.columns(3)
+                                c_col1.write(f"🏷️ **Codice:** `{r.get('codice', '-') or '-'}`")
+                                c_col2.write(f"📝 **Descrizione:** {r.get('descrizione', '-') or '-'}")
+                                c_col3.write(f"💶 **Costo:** {r.get('prezzo', 0.0):.2f} €")
 
                         if note:
                             st.write(f"**Note/Dettagli:** {note}")
